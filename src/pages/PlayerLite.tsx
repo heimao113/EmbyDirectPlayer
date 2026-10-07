@@ -110,6 +110,9 @@ export default function PlayerLite() {
   const extSubsPRef = useRef<Promise<Array<{ source: File; lang?: string; title?: string }>> | null>(null)
   const extSubsLoadedRef = useRef<Array<{ source: File; lang?: string; title?: string }>>([])
   const readyAtRef = useRef(0)
+  // 触屏设备:视频区单击 = 呼出控制栏(桌面单击 = 暂停)
+  const coarsePointerRef = useRef(typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches)
+  const lastTapRef = useRef(0)
   const jassubRef = useRef<JassubHost | null>(null)
   const embeddedFontsRef = useRef<Uint8Array[] | null>(null)
   const lastAssRef = useRef<{ content: string; vw: number; vh: number } | null>(null)
@@ -973,7 +976,22 @@ export default function PlayerLite() {
       <div
         className="ui-surface"
         ref={surfaceRef}
-        onClick={togglePlay}
+        onClick={() => {
+          // 触屏:单击呼出/隐藏控制栏,双击播放/暂停;桌面保持单击即暂停
+          if (coarsePointerRef.current) {
+            const now = Date.now()
+            if (now - lastTapRef.current < 320) {
+              lastTapRef.current = 0
+              setShowControls(true)
+              togglePlay()
+            } else {
+              lastTapRef.current = now
+              setShowControls((v) => !v)
+            }
+          } else {
+            togglePlay()
+          }
+        }}
         onDoubleClick={toggleFullscreen}
       />
       {status === 'ready' && (

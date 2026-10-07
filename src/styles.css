@@ -1509,3 +1509,44 @@ canvas.JASSUB { pointer-events: none !important; }
   height: 100%;
   display: block;
 }
+
+/* ===== 移动端适配(≤768px) ===== */
+@media (max-width: 768px) {
+  .app-main { padding: 12px 12px 48px; }
+  .app-header { padding: 8px 12px; gap: 10px; }
+  .logo { height: 40px; }
+  .logo-img { height: 38px; }
+  .nav-pill { padding: 6px 12px; font-size: 12.5px; }
+  .btn-ghost { padding: 7px 12px; font-size: 12px; white-space: nowrap; }
+  .avatar { width: 30px; height: 30px; font-size: 13px; }
+  .header-right { gap: 8px; }
+  .icon-btn { width: 32px; height: 32px; }
+  .header-search { flex-basis: 150px; }
+
+  .hero { min-height: 64vh; margin: -12px -12px 0; }
+  .hero-content { padding: 0 18px 100px; max-width: 100%; }
+  .hero-title { font-size: clamp(1.7rem, 8vw, 2.4rem); }
+  .hero-overview { -webkit-line-clamp: 3; font-size: 13px; margin-bottom: 16px; }
+  .hero-cta { padding: 10px 26px; font-size: 14px; }
+  .hero-sub { padding: 10px 22px; font-size: 14px; }
+  .hero-picker { right: auto; left: 18px; bottom: 18px; gap: 8px; }
+  .hero-thumb { width: 42px; height: 60px; }
+
+  .home-page section { margin-bottom: 24px; }
+  .home-page h2, .library-page h2 { font-size: 16px; margin-bottom: 10px; }
+  .resume-card { width: 220px; }
+  .poster-row { gap: 10px; }
+
+  .detail-info { flex-direction: column; gap: 14px; padding-top: 10px; }
+  .detail-poster { width: 150px; }
+  .detail-actions { flex-wrap: wrap; }
+  .cta-primary { padding: 11px 24px; font-size: 14px; }
+  .cta-ghost { padding: 11px 18px; font-size: 13.5px; }
+
+  .ui-top { padding: 10px 12px; }
+  .ui-title { font-size: 12px; }
+  .ui-controls { padding: 8px 10px 10px; }
+  .ui-progress-row input[type="range"] { height: 24px; }
+
+  .login-brand-img { max-width: 72vw; }
+}
