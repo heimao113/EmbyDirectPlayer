@@ -114,6 +114,13 @@ export default function PlayerLite() {
   const coarsePointerRef = useRef(typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches)
   const lastTapRef = useRef(0)
   const lastUiTickRef = useRef(0)
+  const [seekFlash, setSeekFlash] = useState<{ side: 'l' | 'r' } | null>(null)
+  const flashTimerRef = useRef<number | undefined>(undefined)
+  const flashSeek = useCallback((side: 'l' | 'r') => {
+    setSeekFlash({ side })
+    if (flashTimerRef.current) window.clearTimeout(flashTimerRef.current)
+    flashTimerRef.current = window.setTimeout(() => setSeekFlash(null), 620)
+  }, [])
   const jassubRef = useRef<JassubHost | null>(null)
   const embeddedFontsRef = useRef<Uint8Array[] | null>(null)
   const lastAssRef = useRef<{ content: string; vw: number; vh: number } | null>(null)
@@ -1054,14 +1061,25 @@ export default function PlayerLite() {
       <div
         className="ui-surface"
         ref={surfaceRef}
-        onClick={() => {
-          // 触屏:单击呼出/隐藏控制栏,双击播放/暂停;桌面保持单击即暂停
+        onClick={(e) => {
+          // 触屏:单击呼出/隐藏控制栏;双击分区 —— 左 40% 快退 10s,右 40% 快进 10s,中间播放/暂停(B 站交互)
           if (coarsePointerRef.current) {
             const now = Date.now()
             if (now - lastTapRef.current < 320) {
               lastTapRef.current = 0
               setShowControls(true)
-              togglePlay()
+              armHide()
+              const rect = surfaceRef.current?.getBoundingClientRect()
+              const x = rect ? (e.clientX - rect.left) / rect.width : 0.5
+              if (x < 0.4) {
+                commitSeek(Math.max(0, cur - 10))
+                flashSeek('l')
+              } else if (x > 0.6) {
+                commitSeek(Math.min(dur || 1e9, cur + 10))
+                flashSeek('r')
+              } else {
+                togglePlay()
+              }
             } else {
               lastTapRef.current = now
               setShowControls((v) => {
@@ -1079,6 +1097,10 @@ export default function PlayerLite() {
       {status === 'ready' && (
         <div className={`ui-controls ${!showControls && !paused ? 'ui-hidden' : ''}`}>
           <div className="ui-progress-row">
+            <div className="ui-track"><div className="ui-track-fill" style={{ width: `${(seekDragging ? seekPreview : dur > 0 ? Math.min(1000, Math.round((cur / dur) * 1000)) : 0) / 10}%` }} /></div>
+            {seekDragging && dur > 0 && (
+              <div className="ui-seek-bubble" style={{ left: `${seekPreview / 10}%` }}>{fmt((seekPreview / 1000) * dur)}</div>
+            )}
             <input
               type="range"
               min={0}
@@ -1112,7 +1134,7 @@ export default function PlayerLite() {
               </div>
             )}
             <div className="ui-menu-box">
-              <button onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === 'speed' ? null : 'speed') }}>{rate}×</button>
+              <button onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === 'speed' ? null : 'speed') }} title="倍速">倍速{rate !== 1 ? ` ${rate}×` : ''}</button>
               {openMenu === 'speed' && (
                 <div className="ui-menu" onClick={(e) => e.stopPropagation()}>
                   {[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => (
@@ -1148,6 +1170,14 @@ export default function PlayerLite() {
             </div>
             <button onClick={toggleFullscreen} title="全屏">⛶</button>
           </div>
+        </div>
+      )}
+      {seekFlash && (
+        <div
+          className="ui-seek-flash"
+          style={{ left: seekFlash.side === 'l' ? '25%' : '75%' }}
+        >
+          {seekFlash.side === 'l' ? '⏪ 快退 10 秒' : '快进 10 秒 ⏩'}
         </div>
       )}
       {diagOpen && (
