@@ -21,8 +21,10 @@ import { AVCodecID } from '@libmedia/avutil/enum'
 import { useApp } from '../state'
 import type { BaseItem, MediaSource, MediaStream } from '../api/types'
 import { buildDeviceProfile, isAudioLocallyDecodable, pickPreferredAudioIndex } from '../player/deviceProfile'
-import { fetchSubtitleText, setBilingualStripPref, getBilingualStripPref } from '../player/subtitles'
-import { registerFontFaces } from '../player/fonts'
+import { fetchSubtitleText, toFixedFormatAss, setBilingualStripPref, getBilingualStripPref } from '../player/subtitles'
+import { JassubHost } from '../player/jassubHost'
+import { loadFontManifest, toJassubFontConfig, registerFontFaces } from '../player/fonts'
+import { mapUint8Array } from '@libmedia/cheap'
 
 const WASM_BASE = new URL(import.meta.env.BASE_URL, location.href).href
 
@@ -92,6 +94,9 @@ export default function PlayerLite() {
   const hintRef = useRef<number | undefined>(undefined)
   const srcRef = useRef<SrcInfo | null>(null)
   const extSubsPRef = useRef<Promise<Array<{ source: File; lang?: string; title?: string }>> | null>(null)
+  const jassubRef = useRef<JassubHost | null>(null)
+  const embeddedFontsRef = useRef<Uint8Array[] | null>(null)
+  const lastAssRef = useRef<{ content: string; vw: number; vh: number } | null>(null)
 
   const [item, setItem] = useState<BaseItem | null>(null)
   const [src, setSrc] = useState<SrcInfo | null>(null)
@@ -517,6 +522,91 @@ export default function PlayerLite() {
     if (status !== 'ready') return
     void registerFontFaces()
   }, [status])
+
+  // ---------- 字幕装载:文本轨 → 固定格式 → JASSUB;PGS → libmedia 原生 ----------
+  useEffect(() => {
+    const t = setTimeout(async () => {
+      const player = playerRef.current
+      const surface = surfaceRef.current
+      const ms = msRef.current
+      if (!player || !surface || !ms) return
+      try {
+        const all = (ms.MediaStreams ?? []).filter((x) => x.Type === 'Subtitle')
+        const textSubs = all.filter((x) => !['pgs', 'pgssub', 'dvdsub', 'sup', 'dvbsub'].includes((x.Codec ?? '').toLowerCase()))
+        // 无文本轨:尝试内嵌 PGS(中文优先)交给 libmedia 原生渲染
+        if (textSubs.length === 0) {
+          const pgs = all.find((x) => (x.Language ?? '').toLowerCase().startsWith('zh')) ?? all[0]
+          if (pgs) {
+            const streams = (player.getStreams?.() ?? []) as unknown as Array<{ id: number; index?: number }>
+            const target = streams.find((s) => Number(s.index) === pgs.Index)
+            if (target) {
+              await player.selectSubtitle(target.id).catch(() => {})
+              player.setSubtitleEnable(true)
+              console.info(`[subtitle] 位图字幕轨已选:轨 ${pgs.Index}`)
+            }
+          }
+          return
+        }
+        // 选最佳文本轨:默认 > 中文 > 第一条
+        const pick =
+          textSubs.find((x) => x.IsDefault) ??
+          textSubs.find((x) => (x.Language ?? '').toLowerCase().startsWith('zh')) ??
+          textSubs[0]
+        const raw = await fetchSubtitleText(
+          api,
+          { index: pick.Index, label: pick.DisplayTitle ?? '', codec: pick.Codec ?? '', isText: true, isGraphic: false, deliveryUrl: pick.DeliveryUrl },
+          itemId,
+          ms.Id,
+        )
+        const v0 = (ms.MediaStreams ?? []).find((x) => x.Type === 'Video')
+        // 固定格式:统一思源黑体/底部居中,双语按行堆叠(偏好:剥离日文行)
+        const content = toFixedFormatAss(raw, 1920, 1080, { stripBilingual: getBilingualStripPref() })
+        lastAssRef.current = { content, vw: v0?.Width ?? 1920, vh: v0?.Height ?? 1080 }
+        // 字体:JASSUB 内嵌 fonts(库内嵌字体字节)+ availableFonts(TTF 清单)
+        if (!embeddedFontsRef.current) {
+          try {
+            const fonts: Uint8Array[] = []
+            let total = 0
+            const proxies = ((player.getStreams?.() ?? []) as unknown as Array<{
+              id: number
+              codecparProxy?: { codecType?: unknown; extradata?: unknown; extradataSize?: unknown }
+              metadata?: { filename?: string }
+            }>)
+            for (const g of proxies) {
+              const cp = g.codecparProxy
+              if (!cp || Number(cp.codecType) !== 4) continue // ATTACHMENT
+              const size = Number(cp.extradataSize ?? 0)
+              if (size < 128 || total + size > 96 * 1024 * 1024) continue
+              const view = mapUint8Array(cp.extradata as never, size)
+              fonts.push(new Uint8Array(view))
+              total += size
+            }
+            embeddedFontsRef.current = fonts
+            console.info(`[subtitle] MKV 内嵌字体:${fonts.length} 个 / ${Math.round(total / 1024)}KB`)
+          } catch { /* ignore */ }
+        }
+        const cfg = toJassubFontConfig(await loadFontManifest())
+        jassubRef.current?.detach()
+        const host = new JassubHost()
+        jassubRef.current = host
+        await host.attach({
+          surface,
+          assContent: content,
+          availableFonts: cfg.availableFonts,
+          defaultFont: cfg.fallback || 'sans-serif',
+          fonts: embeddedFontsRef.current ?? [],
+          getSec: () => Number(player.currentTime ?? 0) / 1000,
+        })
+        // 关闭 libmedia 内置渲染,避免与 JASSUB 双重字幕
+        player.setSubtitleEnable(false)
+        setSubOn(true)
+        console.info(`[subtitle] JASSUB 已挂载:轨 ${pick.Index} ${Math.round(content.length / 1024)}KB`)
+      } catch (e) {
+        console.warn('[subtitle] 装载失败(可尝试切换字幕轨)', e)
+      }
+    }, 800)
+    return () => clearTimeout(t)
+  }, [status, itemId, api, subOn])
 
   // ---------- 进度上报(开始 + 每 10 秒) ----------
   useEffect(() => {
