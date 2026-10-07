@@ -8,7 +8,6 @@
   --text-dim: #9aa0a8;
   --accent: #ff4d94;
   --accent-2: #ff7ab5;
-  /* 主题色预设(设置面板切换,见 data-accent) */
   --danger: #e05555;
   --radius: 10px;
 }
@@ -63,21 +62,54 @@ input {
 }
 .nav-pill:hover { color: var(--text); background: rgba(255,255,255,0.06); }
 .nav-pill.active { color: #fff; background: linear-gradient(135deg, var(--accent-2), var(--accent)); font-weight: 600; }
-.header-search { flex: 0 1 340px; }
-.header-search input {
-  width: 100%; padding: 8px 14px;
-  background: var(--panel-2); border: 1px solid #2a2f37; border-radius: 999px;
-  color: var(--text); outline: none;
+/* 顶栏搜索:胶囊输入框,内嵌放大镜图标 */
+.header-search { flex: 0 1 300px; position: relative; }
+.header-search .search-ico {
+  position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
+  display: flex; color: var(--text-dim); pointer-events: none;
 }
-.header-search input:focus { border-color: var(--accent); }
-.header-right { margin-left: auto; display: flex; align-items: center; gap: 10px; }
-.icon-btn { background: var(--panel-2); border: none; border-radius: 999px; width: 36px; height: 36px; font-size: 15px; }
-.icon-btn:hover { background: #232830; }
+.header-search input {
+  width: 100%; padding: 9px 16px 9px 38px;
+  background: rgba(255,255,255,0.05); border: 1px solid rgba(255,255,255,0.09); border-radius: 999px;
+  color: var(--text); outline: none; font-size: 13.5px;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.header-search input::placeholder { color: var(--text-dim); }
+.header-search input:focus {
+  border-color: var(--accent);
+  background: rgba(255,255,255,0.08);
+  box-shadow: 0 0 0 3px rgba(255, 77, 148, 0.15);
+}
+.header-right { margin-left: auto; display: flex; align-items: center; gap: 12px; }
+/* 圆形图标按钮:玻璃质感,悬停提亮 */
+.icon-btn {
+  display: flex; align-items: center; justify-content: center;
+  width: 36px; height: 36px; border-radius: 999px;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.09);
+  color: #b6bcc6;
+  transition: all 0.15s ease;
+}
+.icon-btn:hover {
+  background: rgba(255,255,255,0.1);
+  color: #fff;
+  border-color: rgba(255,255,255,0.2);
+  transform: translateY(-1px);
+}
+.icon-btn:active { transform: translateY(0) scale(0.95); }
+/* 头像:主题渐变 + 细环,悬停发光 */
 .avatar {
   width: 34px; height: 34px; border-radius: 999px;
   background: linear-gradient(135deg, var(--accent-2), var(--accent));
-  color: #fff; font-weight: 700; font-size: 15px;
+  color: #fff; font-weight: 700; font-size: 14.5px;
   display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.1), 0 2px 10px rgba(255, 77, 148, 0.35);
+  cursor: default; user-select: none;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
+}
+.avatar:hover {
+  box-shadow: 0 0 0 2px rgba(255,255,255,0.22), 0 2px 16px rgba(255, 77, 148, 0.55);
+  transform: scale(1.05);
 }
 
 .btn-primary {
@@ -87,12 +119,19 @@ input {
 }
 .btn-primary:hover { filter: brightness(1.1); }
 .btn-primary:disabled { opacity: 0.5; cursor: default; }
+/* 退出按钮:幽灵胶囊,悬停淡红提示退出语义 */
 .btn-ghost {
-  padding: 8px 14px;
-  background: var(--panel-2); color: var(--text);
-  border: 1px solid #2a2f37;
+  padding: 8px 18px; border-radius: 999px;
+  background: rgba(255,255,255,0.04);
+  color: #b6bcc6; font-size: 13px;
+  border: 1px solid rgba(255,255,255,0.1);
+  transition: all 0.15s ease;
 }
-.btn-ghost:hover { border-color: var(--accent); }
+.btn-ghost:hover {
+  color: #ff8a8a;
+  border-color: rgba(224, 85, 85, 0.45);
+  background: rgba(224, 85, 85, 0.08);
+}
 
 /* ---------- 登录 ---------- */
 /* ---------- 登录页(UHD 风格复刻) ---------- */
@@ -425,8 +464,8 @@ input {
 .hero-shade {
   position: absolute; inset: 0;
   background:
-    linear-gradient(to top, #0b0d10 2%, rgba(11,13,16,0.62) 26%, rgba(11,13,16,0.06) 58%, rgba(11,13,16,0.30) 100%),
-    linear-gradient(to right, rgba(11,13,16,0.80) 0%, rgba(11,13,16,0.25) 46%, rgba(11,13,16,0) 72%);
+    linear-gradient(to top, #0b0d10 4%, rgba(11,13,16,0.72) 30%, rgba(11,13,16,0.12) 62%, rgba(11,13,16,0.30) 100%),
+    linear-gradient(to right, rgba(11,13,16,0.88) 0%, rgba(11,13,16,0.45) 40%, rgba(11,13,16,0.08) 72%);
 }
 .hero-content {
   position: relative; z-index: 2;
@@ -1107,14 +1146,6 @@ canvas.JASSUB { pointer-events: none !important; }
 @keyframes ewp-spin { to { transform: rotate(360deg); } }
 
 
-/* ---------- 主题色预设(设置面板切换) ---------- */
-body[data-accent="pink"]    { --accent: #ff4d94; --accent-2: #ff7ab5; }
-body[data-accent="emerald"] { --accent: #10b981; --accent-2: #34d399; }
-body[data-accent="blue"]    { --accent: #3b82f6; --accent-2: #60a5fa; }
-body[data-accent="violet"]  { --accent: #8b5cf6; --accent-2: #a78bfa; }
-body[data-accent="orange"]  { --accent: #f97316; --accent-2: #fb923c; }
-body[data-accent="cyan"]    { --accent: #06b6d4; --accent-2: #22d3ee; }
-
 /* ---------- 海报卡悬停遮罩 + 悬浮播放(uhd/MoonTV 风) ---------- */
 .poster-hover {
   position: absolute; inset: 0; z-index: 3;
@@ -1150,27 +1181,6 @@ body[data-accent="cyan"]    { --accent: #06b6d4; --accent-2: #22d3ee; }
 @keyframes ewp-shimmer { from { transform: translateX(-100%); } to { transform: translateX(100%); } }
 .skeleton-poster { width: 140px; height: 210px; flex-shrink: 0; }
 .skeleton-line { height: 12px; margin-top: 8px; border-radius: 4px; width: 80%; }
-
-/* ---------- 设置面板 ---------- */
-.settings-pop {
-  position: absolute; right: 0; top: 46px; z-index: 60;
-  width: 240px;
-  background: var(--panel); border: 1px solid rgba(255,255,255,0.08);
-  border-radius: 12px; padding: 14px;
-  box-shadow: 0 10px 30px rgba(0,0,0,0.45);
-}
-.settings-pop h4 { margin: 0 0 10px; font-size: 13px; color: var(--text); }
-.theme-swatches { display: flex; gap: 10px; flex-wrap: wrap; }
-.theme-swatch {
-  width: 34px; height: 34px; border-radius: 999px;
-  border: 2px solid transparent; cursor: pointer;
-  display: flex; align-items: center; justify-content: center;
-  transition: transform 0.12s ease;
-}
-.theme-swatch:hover { transform: scale(1.12); }
-.theme-swatch.active { border-color: #fff; }
-.theme-swatch span { width: 22px; height: 22px; border-radius: 999px; }
-
 
 /* 库页头部:标题左 排序右 */
 .library-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }

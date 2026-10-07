@@ -51,6 +51,7 @@ export default function Home() {
   const [viewRows, setViewRows] = useState<ViewRow[]>([])
   const [error, setError] = useState('')
   const [heroIdx, setHeroIdx] = useState(0)
+  const [heroes, setHeroes] = useState<BaseItem[]>([])
 
   useEffect(() => {
     Promise.all([api.resumeItems(), api.latestItems(), api.views()])
@@ -58,6 +59,24 @@ export default function Home() {
         setResume(r)
         setLatest(l)
         setViews(v)
+        // 推荐位:从「动漫推荐」库随机抽几部(有图的),没有该库时退回 最新+继续观看
+        let pool: BaseItem[] = []
+        const recView = v.find((x) => (x.Name ?? '').includes('推荐'))
+        if (recView) {
+          try {
+            const r2 = await api.libraryItems(recView.Id, 0, 40, undefined, 'random')
+            pool = r2.Items.filter(
+              (it) => it.ImageTags?.Primary || (it.BackdropImageTags?.length ?? 0) > 0,
+            )
+          } catch {
+            /* 拉取失败走兜底 */
+          }
+        }
+        setHeroes(
+          pool.length > 0
+            ? pool.slice(0, 5)
+            : [...r.slice(0, 2), ...l.slice(0, 5)].slice(0, 5),
+        )
         const rows = await Promise.all(
           v.map(async (view): Promise<ViewRow> => {
             try {
@@ -73,7 +92,6 @@ export default function Home() {
       .catch((e) => setError(e instanceof Error ? e.message : String(e)))
   }, [api])
 
-  const heroes = [...resume.slice(0, 2), ...latest.slice(0, 5)].slice(0, 5)
   useEffect(() => {
     if (heroes.length < 2) return
     const t = setInterval(() => setHeroIdx((i) => (i + 1) % heroes.length), 8000)
@@ -119,7 +137,15 @@ export default function Home() {
                 <button
                   key={h.Id}
                   className={`hero-thumb ${i === heroIdx ? 'active' : ''}`}
-                  style={{ backgroundImage: `url(${h.ImageTags?.Primary ? api.imageUrl(h.Id, 'Primary', 120) : ''})` }}
+                  style={{
+                    backgroundImage: `url(${
+                      h.ImageTags?.Primary
+                        ? api.imageUrl(h.Id, 'Primary', 120)
+                        : (h.BackdropImageTags?.length ?? 0) > 0
+                          ? apiImg(h.Id, 'Backdrop', 240)
+                          : ''
+                    })`,
+                  }}
                   onClick={() => setHeroIdx(i)}
                 />
               ))}

@@ -5,9 +5,8 @@ import { AppProvider } from './state'
 import App from './App'
 import './styles.css'
 
-// 应用保存的主题色(设置面板写入)
-const savedAccent = localStorage.getItem('ewp/accent')
-if (savedAccent) document.body.dataset.accent = savedAccent
+// 主题色功能已移除,清理旧用户本地存储里残留的切换记录
+localStorage.removeItem('ewp/accent')
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

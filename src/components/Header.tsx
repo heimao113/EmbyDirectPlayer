@@ -11,14 +11,6 @@ export default function Header() {
   const [term, setTerm] = useState('')
   const [views, setViews] = useState<BaseItem[]>([])
   const [searchOpen, setSearchOpen] = useState(false)
-  const [settingsOpen, setSettingsOpen] = useState(false)
-  const [accent, setAccent] = useState(() => localStorage.getItem('ewp/accent') ?? 'pink')
-
-  const applyAccent = (key: string) => {
-    document.body.dataset.accent = key
-    localStorage.setItem('ewp/accent', key)
-    setAccent(key)
-  }
 
   useEffect(() => {
     api.views().then(setViews).catch(() => {})
@@ -33,7 +25,7 @@ export default function Header() {
     path === '/' ? location.pathname === '/' : location.pathname.startsWith(path)
 
   return (
-    <header className="app-header" onClick={() => setSettingsOpen(false)}>
+    <header className="app-header">
       <span className="logo" onClick={() => navigate('/')}>
         <img src="/stream/logo-wordmark.png" alt="heimao" className="logo-img" />
       </span>
@@ -54,40 +46,28 @@ export default function Header() {
       <div className="header-right">
         {searchOpen ? (
           <form className="header-search" onSubmit={doSearch}>
+            <span className="search-ico">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round">
+                <circle cx="11" cy="11" r="7" />
+                <path d="m20 20-3.5-3.5" />
+              </svg>
+            </span>
             <input
               autoFocus
               value={term}
               onChange={(e) => setTerm(e.target.value)}
               onBlur={() => !term && setSearchOpen(false)}
-              placeholder="搜索电影、剧集…"
+              placeholder="搜索影片…"
             />
           </form>
         ) : (
-          <button className="icon-btn" onClick={() => setSearchOpen(true)} title="搜索">🔍</button>
+          <button className="icon-btn" onClick={() => setSearchOpen(true)} title="搜索" aria-label="搜索">
+            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <circle cx="11" cy="11" r="7" />
+              <path d="m20 20-3.5-3.5" />
+            </svg>
+          </button>
         )}
-        <div className="settings-box">
-          <button className="icon-btn" title="界面设置" onClick={(e) => { e.stopPropagation(); setSettingsOpen(!settingsOpen) }}>⚙</button>
-          {settingsOpen && (
-            <div className="settings-pop" onClick={(e) => e.stopPropagation()}>
-              <h4>主题色</h4>
-              <div className="theme-swatches">
-                {([
-                  ['pink', '#ff4d94'], ['emerald', '#10b981'], ['blue', '#3b82f6'],
-                  ['violet', '#8b5cf6'], ['orange', '#f97316'], ['cyan', '#06b6d4'],
-                ] as [string, string][]).map(([key, color]) => (
-                  <button
-                    key={key}
-                    className={`theme-swatch ${accent === key ? 'active' : ''}`}
-                    onClick={() => applyAccent(key)}
-                    title={key}
-                  >
-                    <span style={{ background: `linear-gradient(135deg, ${color}, ${color}cc)` }} />
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
         <span className="avatar" title={auth?.userName}>{(auth?.userName ?? '?').slice(0, 1).toUpperCase()}</span>
         <button
           className="btn-ghost"

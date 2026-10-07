@@ -171,7 +171,7 @@ export class EmbyApi {
     startIndex: number,
     limit: number,
     searchTerm?: string,
-    sort: 'latest' | 'name' = 'latest',
+    sort: 'latest' | 'name' | 'random' = 'latest',
   ): Promise<{ Items: BaseItem[]; TotalRecordCount: number }> {
     const uid = this.mustAuth().userId
     const r = await this.request<{ Items: BaseItem[]; TotalRecordCount: number }>(
@@ -185,8 +185,8 @@ export class EmbyApi {
           IncludeItemTypes: 'Movie,Series',
           Recursive: true,
           SearchTerm: searchTerm,
-          // 库浏览默认"最新入库优先",可切按名称
-          SortBy: sort === 'latest' ? 'DateCreated' : 'SortName',
+          // 库浏览默认"最新入库优先",可切按名称/随机
+          SortBy: sort === 'latest' ? 'DateCreated' : sort === 'random' ? 'Random' : 'SortName',
           SortOrder: sort === 'latest' ? 'Descending' : 'Ascending',
           Fields: 'PrimaryImageAspectRatio,ProductionYear,Overview',
           StartIndex: startIndex,
