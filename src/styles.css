@@ -393,6 +393,150 @@ input {
 }
 
 /* ---------- 首页 / 媒体库 ---------- */
+
+/* Hero 增强:更沉浸的电影感 */
+.hero { min-height: 480px; border-radius: 0 0 18px 18px; margin: -20px -24px 28px; }
+.hero-bg { transition: background-image 0.6s ease; transform: scale(1.02); }
+.hero-shade {
+  background:
+    linear-gradient(to top, var(--bg) 3%, rgba(11,13,18,0.6) 38%, rgba(11,13,18,0.12) 68%),
+    linear-gradient(to right, rgba(11,13,18,0.82) 0%, rgba(11,13,18,0.28) 50%, transparent 75%);
+}
+.hero-content { padding: 36px 42px; max-width: 700px; }
+.hero-badge {
+  background: rgba(255, 107, 157, 0.14);
+  border: 1px solid rgba(255, 107, 157, 0.3);
+  color: #ff8ab1;
+  padding: 4px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+.hero-title {
+  font-size: clamp(2rem, 5vw, 3.4rem);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.4);
+}
+.hero-meta { gap: 8px; font-size: 13.5px; color: rgba(232, 234, 237, 0.82); }
+.hero-meta span:not(:first-child)::before { content: '·'; margin-right: 8px; color: var(--text-dim); }
+.hero-overview {
+  color: rgba(232, 234, 237, 0.68);
+  font-size: 13.5px;
+  line-height: 1.65;
+  max-height: 3.2em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.hero-cta {
+  background: linear-gradient(135deg, #ff6b9d, #ff4d94);
+  color: #fff;
+  font-size: 15px;
+  font-weight: 700;
+  padding: 12px 36px;
+  border-radius: 999px;
+  transition: transform 0.12s ease, box-shadow 0.15s ease;
+  box-shadow: 0 4px 18px rgba(255, 77, 148, 0.3);
+}
+.hero-cta:hover { transform: scale(1.03); box-shadow: 0 6px 24px rgba(255, 77, 148, 0.4); }
+.hero-cta:active { transform: scale(0.98); }
+.hero-arrows { right: 20px; bottom: 30px; }
+.hero-arrow {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  font-size: 18px;
+  display: flex; align-items: center; justify-content: center;
+  transition: background 0.15s;
+  backdrop-filter: blur(6px);
+}
+.hero-arrow:hover { background: rgba(255, 255, 255, 0.22); }
+.hero-dots { bottom: 18px; right: 28px; }
+.hero-dot { width: 7px; height: 7px; border-radius: 50%; background: rgba(255,255,255,0.3); border: none; cursor: pointer; transition: all 0.2s; }
+.hero-dot.active { background: #ff6b9d; width: 18px; border-radius: 4px; }
+
+/* Section 标题增强 */
+.home-page section { margin-bottom: 38px; }
+.home-page h2 {
+  font-size: 17px;
+  font-weight: 700;
+  color: #f0f2f5;
+  margin: 0 0 14px;
+  display: flex; align-items: center; gap: 8px;
+  padding-left: 12px;
+  border-left: 3px solid var(--accent);
+  line-height: 1.2;
+}
+.home-page h2 .count { color: var(--text-dim); font-size: 13px; font-weight: 400; }
+.see-all { color: var(--text-dim); font-size: 12.5px; background: none; border: none; margin-left: auto; cursor: pointer; transition: color 0.15s; }
+.see-all:hover { color: var(--accent); }
+
+/* 继续观看卡片 */
+.resume-card {
+  min-width: 280px;
+  max-width: 280px;
+  cursor: pointer;
+  border-radius: 12px;
+  transition: transform 0.15s ease;
+}
+.resume-card:hover { transform: translateY(-3px); }
+.resume-thumb {
+  border-radius: 12px;
+  overflow: hidden;
+  aspect-ratio: 16/9;
+  position: relative;
+  background: var(--panel-2);
+}
+.resume-thumb img { width: 100%; height: 100%; object-fit: cover; transition: transform 0.3s ease; }
+.resume-card:hover .resume-thumb img { transform: scale(1.04); }
+.resume-play {
+  position: absolute; top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  width: 44px; height: 44px;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  border: 1.5px solid rgba(255, 255, 255, 0.3);
+  color: #fff;
+  font-size: 14px;
+  display: flex; align-items: center; justify-content: center;
+  opacity: 0;
+  transition: opacity 0.2s;
+  backdrop-filter: blur(4px);
+}
+.resume-card:hover .resume-play { opacity: 1; }
+.resume-remain {
+  position: absolute; top: 8px; right: 8px;
+  background: rgba(0, 0, 0, 0.7);
+  color: #fff;
+  font-size: 11.5px;
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.progress-track { position: absolute; bottom: 0; left: 0; right: 0; height: 3px; background: rgba(255,255,255,0.12); }
+.progress-fill { height: 100%; background: var(--accent); border-radius: 0 2px 2px 0; }
+.resume-title { font-size: 13.5px; font-weight: 600; color: #e8eaed; margin-top: 10px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.resume-sub { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.resume-pct { color: #ff6b9d; }
+
+/* Poster 行横向滚动 */
+.poster-row {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 12px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
+}
+.poster-row::-webkit-scrollbar { height: 6px; }
+.poster-row::-webkit-scrollbar-track { background: transparent; }
+.poster-row::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+
+
 .home-page section { margin-bottom: 34px; }
 
 /* ---------- Hero 轮播(UHD 风) ---------- */
