@@ -317,12 +317,23 @@ export function toFixedFormatAss(
   const merged: FixedEvent[] = []
   for (const e of events) {
     const last = merged[merged.length - 1]
+    // 行去重按 trim 归一(部分字幕组同文本多轨/多层会带不可见差异)
     if (last && e.start < last.end - 0.1) {
       last.end = Math.max(last.end, e.end)
-      for (const l of e.lines) if (!last.lines.includes(l)) last.lines.push(l)
+      for (const l of e.lines) {
+        const t = l.trim()
+        if (t && !last.lines.some((x) => x.trim() === t)) last.lines.push(l)
+      }
     } else {
       merged.push({ start: e.start, end: e.end, lines: [...e.lines] })
     }
+  }
+  // 输出前再折叠一次连续重复行(双语合并后的残留)
+  for (const e of merged) {
+    e.lines = e.lines.filter((l, i) => {
+      const t = l.trim()
+      return i === 0 || t === '' || t !== e.lines[i - 1]?.trim()
+    })
   }
 
   const fs = Math.round(resY / 18)

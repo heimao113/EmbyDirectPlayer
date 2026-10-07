@@ -644,7 +644,17 @@ export default function PlayerLite() {
     const target = Math.max(0, Math.min(targetSec, dur || targetSec))
     seekLockRef.current = { target, until: Date.now() + 6000 }
     setCur(target)
-    void player.seek(BigInt(Math.round(target * 1000))).catch(() => {})
+    try {
+      // demux 流未就绪(刚加载/加载中)时 seek 会崩 → 转为 LOADED 后应用的待执行 seek
+      const ready = ((player.getStreams?.() ?? []) as unknown as Array<unknown>).length > 0
+      if (!ready) {
+        pendingSeekRef.current = target
+        return
+      }
+      void player.seek(BigInt(Math.round(target * 1000))).catch(() => {})
+    } catch {
+      pendingSeekRef.current = target
+    }
   }, [dur])
 
   const seekTo = useCallback((sec: number) => {
