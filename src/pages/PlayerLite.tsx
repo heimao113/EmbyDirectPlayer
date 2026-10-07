@@ -97,6 +97,20 @@ export default function PlayerLite() {
   const [errText, setErrText] = useState('')
   const [stage, setStage] = useState('正在建立播放链路…')
   const [badge, setBadge] = useState('')
+  // 控制栏状态
+  const [paused, setPaused] = useState(false)
+  const [cur, setCur] = useState(0)
+  const [dur, setDur] = useState(0)
+  const [volume, setVolume] = useState(() => Number(localStorage.getItem('ewp/volume') ?? 1) || 1)
+  const [muted, setMuted] = useState(false)
+  const [rate, setRate] = useState(1)
+  const [subOn, setSubOn] = useState(true)
+  const [showControls, setShowControls] = useState(true)
+  const [openMenu, setOpenMenu] = useState<'audio' | 'speed' | null>(null)
+  const [audioTracks, setAudioTracks] = useState<Array<{ id: number; label: string }>>([])
+  const [selectedAudioId, setSelectedAudioId] = useState(-1)
+  const hideTimerRef = useRef<number | null>(null)
+  const shellRef = useRef<HTMLDivElement | null>(null)
 
   const profile = useMemo(() => buildDeviceProfile(false), [])
 
@@ -211,9 +225,16 @@ export default function PlayerLite() {
       }
       void player.play().catch(() => {})
     })
-    player.on(Events.PAUSED, () => { pausedRef.current = true })
-    player.on(Events.PLAYED, () => { pausedRef.current = false })
-    player.on(Events.TIME, () => { if (pausedRef.current) pausedRef.current = false })
+    player.on(Events.PAUSED, () => { pausedRef.current = true; setPaused(true) })
+    player.on(Events.PLAYED, () => { pausedRef.current = false; setPaused(false) })
+    player.on(Events.TIME, () => {
+      if (pausedRef.current) pausedRef.current = false
+      try {
+        setCur(Number(player.currentTime ?? 0) / 1000)
+        const d = player.getDuration()
+        setDur(d > 0n ? Number(d) / 1000 : 0)
+      } catch { /* ignore */ }
+    })
     player.on(Events.ENDED, () => {
       void api.reportStopped({
         ItemId: itemId,
@@ -343,6 +364,20 @@ export default function PlayerLite() {
         } as never)
         if (cancelled) return
         setStatus('ready')
+        // 音轨列表(libmedia 流 id + 声道)
+        try {
+          const streams = (playerRef.current?.getStreams?.() ?? []) as unknown as Array<{
+            id: number
+            mediaType: string
+            codecparProxy?: { channels?: unknown }
+          }>
+          const auds = streams.filter((x) => x.mediaType === 'audio')
+          setAudioTracks(auds.map((a, i) => ({
+            id: a.id,
+            label: `音轨 ${i + 1}${a.codecparProxy?.channels ? ` ${String(a.codecparProxy.channels)}ch` : ''}`,
+          })))
+          setSelectedAudioId(Number(playerRef.current?.getSelectedAudioStreamId?.() ?? -1))
+        } catch { /* ignore */ }
       } catch (e) {
         if (cancelled) return
         setStatus('error')
@@ -461,11 +496,122 @@ export default function PlayerLite() {
     return () => window.removeEventListener('keydown', onKey)
   }, [navigate])
 
+  // ---------- 控制处理 ----------
+  const togglePlay = useCallback(() => {
+    const player = playerRef.current
+    if (!player) return
+    if (pausedRef.current) {
+      void player.play().catch(() => {})
+      pausedRef.current = false
+      setPaused(false)
+    } else {
+      player.pause()
+      pausedRef.current = true
+      setPaused(true)
+    }
+  }, [])
+
+  const seekTo = useCallback((sec: number) => {
+    const player = playerRef.current
+    if (!player) return
+    const target = Math.max(0, Math.min(sec, dur || sec))
+    void player.seek(BigInt(Math.round(target * 1000))).catch(() => {})
+    setCur(target)
+  }, [dur])
+
+  const changeVolume = useCallback((v: number) => {
+    const player = playerRef.current
+    if (!player) return
+    player.setVolume(v)
+    setVolume(v)
+    setMuted(v === 0)
+    try { localStorage.setItem('ewp/volume', String(v)) } catch { /* ignore */ }
+  }, [])
+
+  const toggleMute = useCallback(() => {
+    const player = playerRef.current
+    if (!player) return
+    if (muted) {
+      const v = Number(localStorage.getItem('ewp/volume') ?? 1) || 1
+      player.setVolume(v)
+      setVolume(v)
+      setMuted(false)
+    } else {
+      player.setVolume(0)
+      setMuted(true)
+    }
+  }, [muted])
+
+  const changeRate = useCallback((r: number) => {
+    const player = playerRef.current
+    if (!player) return
+    player.setPlaybackRate(r)
+    setRate(r)
+  }, [])
+
+  const toggleSub = useCallback(() => {
+    const player = playerRef.current
+    if (!player) return
+    const nv = !subOn
+    player.setSubtitleEnable(nv)
+    setSubOn(nv)
+  }, [subOn])
+
+  const toggleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) void document.exitFullscreen()
+    else void shellRef.current?.requestFullscreen?.()
+  }, [])
+
+  const selectAudio = useCallback(async (id: number) => {
+    const player = playerRef.current
+    if (!player) return
+    try {
+      await player.selectAudio(id)
+      setSelectedAudioId(id)
+    } catch (e) {
+      console.warn('[player] 音轨切换失败', e)
+    }
+  }, [])
+
+  // 自动隐藏控制栏:3 秒无操作隐藏,暂停时常显
+  useEffect(() => {
+    const wake = () => {
+      setShowControls(true)
+      if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current)
+      hideTimerRef.current = window.setTimeout(() => {
+        if (!pausedRef.current) setShowControls(false)
+      }, 3000)
+    }
+    wake()
+    const el = shellRef.current
+    el?.addEventListener('mousemove', wake)
+    el?.addEventListener('touchstart', wake)
+    return () => {
+      el?.removeEventListener('mousemove', wake)
+      el?.removeEventListener('touchstart', wake)
+      if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current)
+    }
+  }, [status])
+
+  const fmt = (t: number) => {
+    if (!isFinite(t) || t < 0) return '0:00'
+    const h = Math.floor(t / 3600)
+    const m = Math.floor((t % 3600) / 60)
+    const sec = Math.floor(t % 60)
+    return h > 0 ? `${h}:${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}` : `${m}:${String(sec).padStart(2, '0')}`
+  }
+
+  const playedPct = dur > 0 ? Math.min(100, (cur / dur) * 100) : 0
+
   // ---------- 渲染 ----------
   return (
-    <div className="ui-player-page">
+    <div
+      ref={shellRef}
+      className={`ui-player-page ${!showControls && status === 'ready' && !paused ? 'ui-hide-cursor' : ''}`}
+      onMouseMove={() => setShowControls(true)}
+    >
       {item && (
-        <div className="ui-top">
+        <div className={`ui-top ${!showControls && status === 'ready' && !paused ? 'ui-hidden' : ''}`}>
           <button className="back-pill" onClick={() => navigate(-1)}>← 返回</button>
           <span className="ui-title">
             {item.Type === 'Episode' && item.SeriesName
@@ -475,7 +621,70 @@ export default function PlayerLite() {
           {badge && <span className="ui-badge">{badge}</span>}
         </div>
       )}
-      <div className="ui-surface" ref={surfaceRef} />
+      <div
+        className="ui-surface"
+        ref={surfaceRef}
+        onClick={togglePlay}
+        onDoubleClick={toggleFullscreen}
+      />
+      {status === 'ready' && (
+        <div className={`ui-controls ${!showControls && !paused ? 'ui-hidden' : ''}`}>
+          <div className="ui-progress-row">
+            <input
+              type="range"
+              min={0}
+              max={1000}
+              value={dur > 0 ? Math.min(1000, Math.round((cur / dur) * 1000)) : 0}
+              onChange={(e) => seekTo((Number(e.target.value) / 1000) * dur)}
+              className="ui-progress"
+              aria-label="进度"
+            />
+          </div>
+          <div className="ui-buttons">
+            <button onClick={togglePlay} title={paused ? '播放' : '暂停'}>{paused ? '▶' : '⏸'}</button>
+            <span className="ui-time">{fmt(cur)} / {fmt(dur)}</span>
+            <div className="ui-flex" />
+            <button onClick={toggleSub} title="字幕" className={subOn ? 'ui-on' : 'ui-off'}>字</button>
+            {audioTracks.length > 1 && (
+              <div className="ui-menu-box">
+                <button onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === 'audio' ? null : 'audio') }} title="音轨">音轨</button>
+                {openMenu === 'audio' && (
+                  <div className="ui-menu" onClick={(e) => e.stopPropagation()}>
+                    {audioTracks.map((a) => (
+                      <button key={a.id} className={`ui-menu-item ${selectedAudioId === a.id ? 'ui-on' : ''}`} onClick={() => { void selectAudio(a.id); setOpenMenu(null) }}>
+                        {a.label}{selectedAudioId === a.id ? ' ✓' : ''}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="ui-menu-box">
+              <button onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === 'speed' ? null : 'speed') }}>{rate}×</button>
+              {openMenu === 'speed' && (
+                <div className="ui-menu" onClick={(e) => e.stopPropagation()}>
+                  {[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => (
+                    <button key={r} className={`ui-menu-item ${rate === r ? 'ui-on' : ''}`} onClick={() => { changeRate(r); setOpenMenu(null) }}>
+                      {r}×{rate === r ? ' ✓' : ''}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button onClick={toggleMute} title="静音">{muted || volume === 0 ? '🔇' : '🔊'}</button>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              value={muted ? 0 : Math.round(volume * 100)}
+              onChange={(e) => changeVolume(Number(e.target.value) / 100)}
+              className="ui-volume"
+              aria-label="音量"
+            />
+            <button onClick={toggleFullscreen} title="全屏">⛶</button>
+          </div>
+        </div>
+      )}
       {status === 'loading' && <div className="ui-loading">{stage}</div>}
       {status === 'error' && (
         <div className="ui-error">

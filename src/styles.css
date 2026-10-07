@@ -1072,3 +1072,73 @@ body[data-accent="cyan"]    { --accent: #06b6d4; --accent-2: #22d3ee; }
   cursor: pointer;
   font-size: 14px;
 }
+
+/* ---------- PlayerLite 控制栏 ---------- */
+.ui-controls {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  padding: 26px 18px 12px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.72), transparent);
+  z-index: 20;
+  transition: opacity 0.2s ease;
+}
+.ui-controls.ui-hidden { opacity: 0; pointer-events: none; }
+.ui-hidden { opacity: 0; pointer-events: none; }
+.ui-player-page.ui-hide-cursor { cursor: none; }
+.ui-progress-row { padding: 0 2px 8px; }
+.ui-progress, .ui-volume {
+  width: 100%;
+  appearance: none;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.28);
+  outline: none;
+  cursor: pointer;
+}
+.ui-progress::-webkit-slider-thumb, .ui-volume::-webkit-slider-thumb {
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: #e8eaef;
+}
+.ui-volume { width: 90px; }
+.ui-buttons {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.ui-buttons button {
+  background: none;
+  border: none;
+  color: #e8eaef;
+  font-size: 16px;
+  cursor: pointer;
+  padding: 4px 6px;
+  border-radius: 6px;
+}
+.ui-buttons button:hover { background: rgba(255, 255, 255, 0.12); }
+.ui-buttons .ui-on { color: #9ec3ff; }
+.ui-buttons .ui-off { color: #7a8194; }
+.ui-time { color: #dfe3ec; font-size: 13px; font-variant-numeric: tabular-nums; }
+.ui-flex { flex: 1; }
+.ui-menu-box { position: relative; }
+.ui-menu {
+  position: absolute;
+  bottom: 42px;
+  right: 0;
+  min-width: 150px;
+  background: rgba(18, 20, 24, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 10px;
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.ui-menu-item {
+  text-align: left !important;
+  font-size: 13px !important;
+  padding: 8px 10px !important;
+  white-space: nowrap;
+}
