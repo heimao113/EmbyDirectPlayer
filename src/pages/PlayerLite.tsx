@@ -21,7 +21,7 @@ import { AVCodecID } from '@libmedia/avutil/enum'
 import { useApp } from '../state'
 import type { BaseItem, MediaSource, MediaStream } from '../api/types'
 import { buildDeviceProfile, isAudioLocallyDecodable, pickPreferredAudioIndex } from '../player/deviceProfile'
-import { fetchSubtitleText, toFixedFormatAss, setBilingualStripPref, getBilingualStripPref } from '../player/subtitles'
+import { fetchSubtitleText, toFixedFormatAss, setBilingualStripPref, getBilingualStripPref, stripJapaneseEvents } from '../player/subtitles'
 import { JassubHost } from '../player/jassubHost'
 import { loadFontManifest, toJassubFontConfig, registerFontFaces } from '../player/fonts'
 import { mapUint8Array } from '@libmedia/cheap'
@@ -218,15 +218,20 @@ export default function PlayerLite() {
   const prepareExternalSubs = useCallback(async (): Promise<Array<{ source: File; lang?: string; title?: string }>> => {
     const ms = msRef.current
     if (!ms) return []
-    const all = (ms.MediaStreams ?? []).filter((x) => x.Type === 'Subtitle')
-    const text = all.filter((x) => !['pgs', 'pgssub', 'dvdsub', 'sup', 'dvbsub'].includes((x.Codec ?? '').toLowerCase()))
-    // 内嵌文本轨存在 → libmedia 内置渲染器直接画(样式/位置/内嵌字体为字幕组原设计),
-    // 不再叠加外挂固定格式(双字幕 + 外挂定位偏差就是这么来的)
-    if (text.length > 0) return []
-    const externalOnly = all.filter((x) => x.IsExternal)
-    if (externalOnly.length === 0) return []
+    // 无条件从 Emby 提取最佳文本字幕轨(默认标记 > 中文 > 第一条):
+    // libmedia 的 demuxer 对部分 MKV 解不出字幕流(如罪恶王冠/旋风管家),
+    // 必须通过 Emby 提取接口获取字幕内容,经 loadExternalSubtitle 装载
+    const text = (ms.MediaStreams ?? []).filter(
+      (x) =>
+        x.Type === 'Subtitle' &&
+        !['pgs', 'pgssub', 'dvdsub', 'sup', 'dvbsub'].includes((x.Codec ?? '').toLowerCase()),
+    )
+    if (text.length === 0) return []
     const strip = getBilingualStripPref()
-    const pick = externalOnly.find((s) => s.IsDefault) ?? externalOnly.find((s) => (s.Language ?? '').toLowerCase().startsWith('zh')) ?? externalOnly[0]
+    const pick =
+      text.find((s) => s.IsDefault) ??
+      text.find((s) => (s.Language ?? '').toLowerCase().startsWith('zh')) ??
+      text[0]
     try {
       const raw = await fetchSubtitleText(
         api,
@@ -234,10 +239,12 @@ export default function PlayerLite() {
         itemId,
         ms.Id,
       )
-      // 双语偏好:开启时剥离日文行(持久化设置,字幕菜单可切换)
-      const file = new File([raw], `subtitle.${pick.Codec === 'subrip' ? 'srt' : pick.Codec}`, { type: 'text/plain' })
+      // 固定格式:统一思源黑体/底部居中,双语按行堆叠;双语剥离按持久化偏好
+      const base = strip ? stripJapaneseEvents(raw) : raw
+      const content = toFixedFormatAss(base, 1920, 1080)
+      const file = new File([content], 'subtitle.ass', { type: 'text/plain' })
       const out = [{ source: file, lang: pick.Language ?? pick.Codec ?? '', title: pick.DisplayTitle ?? pick.Title ?? '字幕' }]
-      console.info(`[subtitle] 外挂装载:轨 ${pick.Index} ${pick.Codec} ${Math.round(raw.length / 1024)}KB`)
+      console.info(`[subtitle] 外挂装载(固定格式):轨 ${pick.Index} ${pick.Codec} ${Math.round(content.length / 1024)}KB`)
       return out
     } catch (e) {
       console.warn('[subtitle] 提取失败,无外挂字幕可装载', e)
