@@ -248,9 +248,15 @@ export default function PlayerLite() {
       startedRef.current = true
       setStatus('ready')
       setStage('')
-      const seek = pendingSeekRef.current
+      let seek = pendingSeekRef.current
+      pendingSeekRef.current = 0
+      try {
+        // 二次校验:续播点超出片长(历史坏数据)→ 回到开头,播放后立即回写正确进度自愈
+        const durMs = Number(player.getDuration())
+        const durSec = durMs > 0 ? durMs / 1000 : 0
+        if (durSec > 0 && seek > durSec - 5) seek = 0
+      } catch { /* ignore */ }
       if (seek > 0) {
-        pendingSeekRef.current = 0
         void player.seek(BigInt(Math.round(seek * 1000))).catch(() => {})
       }
       void player.play().catch(() => {})
@@ -454,6 +460,54 @@ export default function PlayerLite() {
       extSubsPRef.current = null
     }
   }, [api, itemId])
+
+  // ---------- 进度上报(开始 + 每 10 秒) ----------
+  useEffect(() => {
+    if (status !== 'ready') return
+    void api
+      .reportPlayingStart({
+        ItemId: itemId,
+        MediaSourceId: msRef.current?.Id,
+        PlaySessionId: playSessionRef.current,
+        CanSeek: true,
+      })
+      .catch(() => {})
+    // 就绪后 2.5 秒回写一次正确进度:自愈历史坏数据(如被写成 29.5 小时的位置)
+    const heal = setTimeout(() => {
+      const player = playerRef.current
+      if (!player) return
+      const sec = Number(player.currentTime ?? 0) / 1000
+      void api
+        .reportProgress({
+          ItemId: itemId,
+          MediaSourceId: msRef.current?.Id,
+          PlaySessionId: playSessionRef.current,
+          PositionTicks: Math.round(sec * 10_000_000),
+          CanSeek: true,
+          IsPaused: pausedRef.current,
+        })
+        .catch(() => {})
+    }, 2500)
+    const timer = setInterval(() => {
+      const player = playerRef.current
+      if (!player) return
+      const sec = Number(player.currentTime ?? 0) / 1000
+      void api
+        .reportProgress({
+          ItemId: itemId,
+          MediaSourceId: msRef.current?.Id,
+          PlaySessionId: playSessionRef.current,
+          PositionTicks: Math.round(sec * 10_000_000),
+          CanSeek: true,
+          IsPaused: pausedRef.current,
+        })
+        .catch(() => {})
+    }, 10_000)
+    return () => {
+      clearTimeout(heal)
+      clearInterval(timer)
+    }
+  }, [status, api, itemId])
 
   // ---------- 看门狗:视频/音频停滞 ----------
   useEffect(() => {
