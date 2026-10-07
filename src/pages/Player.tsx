@@ -7,6 +7,7 @@ import { fetchSubtitleText, toUnifiedAss, assToVtt, parseAssCues, cuesToSrt, typ
 import { loadFontManifest, registerFontFaces, toJassubFontConfig } from '../player/fonts'
 import { JassubHost } from '../player/jassubHost'
 import { Engine, type EngineStream, type PipelineKind } from '../player/engine'
+import { isAudioLocallyDecodable } from '../player/deviceProfile'
 import { NativeEngine } from '../player/native'
 import type { BaseItem, MediaSource, MediaStream } from '../api/types'
 import type { AudioTrackOption, SubTrack } from './playerTypes'
@@ -40,8 +41,10 @@ const AUDIO_CODEC_LABEL: Record<string, string> = {
 
 interface SrcInfo {
   url: string
-  kind: 'direct' | 'direct-native' | 'transcode'
+  kind: 'direct' | 'direct-native' | 'direct-stream' | 'transcode'
   ext?: string
+  /** true = 视频原样直连、仅音频由服务器转 AAC(kind=direct-stream) */
+  audioTranscoded?: boolean
 }
 
 const T = (ticks?: number | null) => (ticks ?? 0) / 10_000_000 // ticks → 秒
@@ -438,7 +441,7 @@ export default function Player() {
         return
       }
       // 第一级降级:直连失败 → 纯 wasm 软解重建
-      if (s.kind === 'direct' && !engineRef.current?.isWasmOnly) {
+      if ((s.kind === 'direct' || s.kind === 'direct-stream') && !engineRef.current?.isWasmOnly) {
         setWasmOnly(true)
         setPipeline('sw')
         void (async () => {
@@ -587,7 +590,21 @@ export default function Player() {
         msePreferredRef.current = Boolean(canDirect && !mseFailMemo().has(mseKey))
         mseKeyRef.current = mseKey
 
-        if (canDirect) {
+        // 音频兜底(P0-1):视频永远直连;音频本地解不了(TrueHD 等,无 wasm 解码器)
+        // 时整条切 DirectStreamUrl/TranscodingUrl——服务器视频 -c copy 仅音频转 AAC,
+        // 真正做到"视频不转码、音频最小处理"。有 remux 链就用,没有则原始直连+运行时兜底(P0-2)
+        const audioLocal = isAudioLocallyDecodable(as?.Codec, supportsAc3)
+        const remuxUrl = (ms.DirectStreamUrl ?? ms.TranscodingUrl ?? '').trim()
+        if (canDirect && !audioLocal && remuxUrl) {
+          const url = remuxUrl.startsWith('http') ? new URL(remuxUrl).pathname + new URL(remuxUrl).search : remuxUrl
+          const ext = (url.match(/\.(mkv|ts|m3u8|mp4)(?:$|\?)/i)?.[1] ?? 'mkv').toLowerCase()
+          setSrc({
+            url,
+            kind: 'direct-stream',
+            ext,
+            audioTranscoded: true,
+          })
+        } else if (canDirect) {
           // mp4(H264/AAC 等浏览器原生支持的组合)→ 原生 <video> 渐进直连:
           // 零 JS 解码开销、seek 由浏览器 Range 处理(绝无 demuxer seek 失败)
           const nativeDirect = ['mp4', 'm4v'].includes(container)
@@ -685,7 +702,7 @@ export default function Player() {
       setSrc({ ...s })
       return
     }
-    if (s.kind === 'direct' && !engine?.isWasmOnly) {
+    if ((s.kind === 'direct' || s.kind === 'direct-stream') && !engine?.isWasmOnly) {
       setWasmOnly(true)
       setPipeline('sw')
       setSrc({ ...s })
@@ -1119,6 +1136,7 @@ export default function Player() {
   const playedPct = dur > 0 ? ((seekPreview !== null ? (seekPreview / 1000) * dur : cur) / dur) * 100 : 0
 
   const badgeText = (() => {
+    if (srcRef.current?.kind === 'direct-stream') return '直连 · 音频转码'
     if (srcRef.current?.kind === 'transcode') return '服务器转码'
     if (pipeline === 'mse') return wasmOnly ? '直连 · MSE' : '直连 · 原生 HDR'
     if (pipeline === 'hw') return '直连 · 硬解'

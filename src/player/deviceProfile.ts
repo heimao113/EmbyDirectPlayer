@@ -5,7 +5,7 @@
  * 或完整转码(最后手段)。
  */
 export function buildDeviceProfile(supportsAc3: boolean) {
-  const audio = ['aac', 'mp3', 'flac', 'opus', 'vorbis']
+  const audio = ['aac', 'mp3', 'flac', 'opus', 'vorbis', 'dts', 'dca']
   if (supportsAc3) audio.push('ac3', 'eac3')
 
   return {
@@ -21,6 +21,16 @@ export function buildDeviceProfile(supportsAc3: boolean) {
     ],
 
     TranscodingProfiles: [
+      // 音频兜底档:视频一律拷贝(源视频编码在 VideoCodec 里即不重编码),
+      // 仅音频转 AAC——TrueHD/DTS-HD 等浏览器无法解码的音轨走这里,服务器 CPU 个位数
+      {
+        Container: 'mkv',
+        Type: 'Video',
+        Protocol: 'http',
+        VideoCodec: 'h264,hevc,av1,vp9',
+        AudioCodec: 'aac',
+        Context: 'Streaming',
+      },
       {
         Container: 'mp4',
         Type: 'Video',
@@ -57,4 +67,27 @@ export function detectAc3Support(): boolean {
   } catch {
     return false
   }
+}
+
+/**
+ * 客户端本地可解码的音频编码矩阵(与 public/wasm 的实际解码器对齐):
+ * - 浏览器原生:aac/mp3/flac/opus/vorbis(MSE/原生 video)
+ * - libmedia wasm:ac3/eac3/dca(DTS)/mp2(降级软解)
+ * TrueHD/MLP 官方无 wasm 解码器 → 不在矩阵内 → 走服务器仅音频转码兜底。
+ */
+export const LOCAL_AUDIO_CODECS = new Set([
+  'aac', 'mp3', 'flac', 'opus', 'vorbis',
+  'ac3', 'eac3', 'dca', 'dts', 'mp2', 'mp3float',
+  'pcm_s16le', 'pcm_s24le', 'pcm_bluray',
+])
+
+/** 判断音频编码是否本地可解(AAC 需浏览器都支持,视为恒可解) */
+export function isAudioLocallyDecodable(codec: string | undefined, supportsAc3: boolean): boolean {
+  if (!codec) return true
+  const c = codec.toLowerCase().trim()
+  if (LOCAL_AUDIO_CODECS.has(c)) {
+    // ac3/eac3 恒可解:wasm 有解码器,不依赖浏览器探测
+    return true
+  }
+  return false
 }

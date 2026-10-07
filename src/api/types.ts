@@ -39,6 +39,8 @@ export interface MediaSource {
   MediaStreams?: MediaStream[]
   SupportsDirectPlay?: boolean
   SupportsDirectStream?: boolean
+  /** 部分 Emby 版本对"原容器重封装"给这个字段(与 TranscodingUrl 二选一) */
+  DirectStreamUrl?: string
   SupportsTranscoding?: boolean
   TranscodingUrl?: string
   TranscodingSubProtocol?: string
