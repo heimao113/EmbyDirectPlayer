@@ -1562,3 +1562,10 @@ canvas.JASSUB { pointer-events: none !important; }
 @media (max-width: 768px) {
   .ui-controls, .ui-top, .back-pill, .ui-badge { transition: none !important; transform: translateZ(0); }
 }
+
+@media (max-width: 768px) {
+  /* 手机用物理音量键,隐藏音量控件为全屏键腾位 */
+  .ui-volume { display: none !important; }
+  .ui-time { white-space: nowrap; font-size: 11.5px; }
+  .ui-buttons button { min-width: 30px; }
+}

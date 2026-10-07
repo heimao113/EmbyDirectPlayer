@@ -881,8 +881,18 @@ export default function PlayerLite() {
   }, [subOn])
 
   const toggleFullscreen = useCallback(() => {
-    if (document.fullscreenElement) void document.exitFullscreen()
-    else void shellRef.current?.requestFullscreen?.()
+    if (document.fullscreenElement) {
+      try { (screen.orientation as ScreenOrientation & { unlock?: () => void }).unlock?.() } catch { /* ignore */ }
+      void document.exitFullscreen().catch(() => {})
+    } else {
+      void shellRef.current
+        ?.requestFullscreen?.()
+        ?.then(() => {
+          // 手机上进入全屏自动横屏(需要全屏态才允许锁定)
+          try { void (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape') } catch { /* ignore */ }
+        })
+        .catch(() => {})
+    }
   }, [])
 
   const selectAudio = useCallback(async (id: number) => {
@@ -896,26 +906,36 @@ export default function PlayerLite() {
     }
   }, [])
 
-  // 自动隐藏控制栏:3 秒无操作隐藏,暂停时常显
+  // 自动隐藏控制栏:桌面 3 秒 / 触屏 8 秒无操作隐藏,暂停时常显
+  // 注意:触屏下 touchstart 不能无条件唤醒,否则与 surface 单击"取反"叠加成"闪现即消失"
+  const armHide = useCallback(() => {
+    const coarse = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
+    if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current)
+    hideTimerRef.current = window.setTimeout(() => {
+      if (!pausedRef.current) setShowControls(false)
+    }, coarse ? 8000 : 3000)
+  }, [])
   useEffect(() => {
     const wake = () => {
       setShowControls(true)
-      if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current)
-      const coarse = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
-      hideTimerRef.current = window.setTimeout(() => {
-        if (!pausedRef.current) setShowControls(false)
-      }, coarse ? 8000 : 3000)
+      armHide()
     }
     wake()
     const el = shellRef.current
-    el?.addEventListener('mousemove', wake)
-    el?.addEventListener('touchstart', wake)
+    const onMove = () => wake()
+    const onTouch = (e: TouchEvent) => {
+      // 触屏:点到控制栏/顶栏才保持显示;点视频区由 surface onClick 接管显隐
+      const t = e.target as HTMLElement | null
+      if (t?.closest('.ui-controls, .ui-top')) wake()
+    }
+    el?.addEventListener('mousemove', onMove)
+    el?.addEventListener('touchstart', onTouch, { passive: true })
     return () => {
-      el?.removeEventListener('mousemove', wake)
-      el?.removeEventListener('touchstart', wake)
+      el?.removeEventListener('mousemove', onMove)
+      el?.removeEventListener('touchstart', onTouch)
       if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current)
     }
-  }, [status])
+  }, [status, armHide])
 
   const fmt = (t: number) => {
     if (!isFinite(t) || t < 0) return '0:00'
@@ -1044,7 +1064,11 @@ export default function PlayerLite() {
               togglePlay()
             } else {
               lastTapRef.current = now
-              setShowControls((v) => !v)
+              setShowControls((v) => {
+                if (!v) armHide()
+                else if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current)
+                return !v
+              })
             }
           } else {
             togglePlay()
