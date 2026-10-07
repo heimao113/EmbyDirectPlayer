@@ -90,6 +90,7 @@ export default function PlayerLite() {
   const audioReloadRef = useRef({ count: 0, lastAt: 0 })
   const hintRef = useRef<number | undefined>(undefined)
   const srcRef = useRef<SrcInfo | null>(null)
+  const extSubsPRef = useRef<Promise<Array<{ source: File; lang?: string; title?: string }>> | null>(null)
 
   const [item, setItem] = useState<BaseItem | null>(null)
   const [src, setSrc] = useState<SrcInfo | null>(null)
@@ -280,6 +281,8 @@ export default function PlayerLite() {
           return
         }
         msRef.current = ms
+        // 字幕提取与视频加载并行:不阻塞起播,装载在 load 完成后进行
+        extSubsPRef.current = prepareExternalSubs().catch(() => [])
         const container = (ms.Container ?? 'mp4').split(',')[0]
         const canDirect = ms.SupportsDirectPlay || ms.SupportsDirectStream
         const as: MediaStream | undefined = (ms.MediaStreams ?? []).find((x) => x.Type === 'Audio')
@@ -345,16 +348,13 @@ export default function PlayerLite() {
     ;(async () => {
       try {
         setStage('正在建立播放链路…')
-        // 官方外挂字幕:Emby 提取的字幕以 externalSubtitles 随 load 一起装载
-        const externalSubtitles = await prepareExternalSubs()
-        if (cancelled) return
+        // 视频加载立即开始;字幕提取已在初始化时并行启动,起播后挂载
         const v0 = (msRef.current?.MediaStreams ?? []).find((x) => x.Type === 'Video')
         const br = v0?.BitRate ?? 0
         const preload = Math.min(64 * 1024 * 1024, Math.max(8 * 1024 * 1024, Math.round((br / 8) * 20)))
         await player.load(src.url, {
           ...(src.ext ? { ext: src.ext } : {}),
           ...(src.kind === 'direct' ? { maxProbeDuration: 15 } : {}),
-          ...(externalSubtitles.length ? { externalSubtitles } : {}),
           ioLoaderOptions: {
             preload,
             retryCount: 30,
@@ -364,7 +364,6 @@ export default function PlayerLite() {
         } as never)
         if (cancelled) return
         setStatus('ready')
-        // 音轨列表(libmedia 流 id + 声道)
         try {
           const streams = (playerRef.current?.getStreams?.() ?? []) as unknown as Array<{
             id: number
@@ -378,6 +377,13 @@ export default function PlayerLite() {
           })))
           setSelectedAudioId(Number(playerRef.current?.getSelectedAudioStreamId?.() ?? -1))
         } catch { /* ignore */ }
+        // 字幕装载:不阻塞视频,ready 后尽快挂上
+        const subs = await (extSubsPRef.current ?? Promise.resolve([]))
+        if (cancelled) return
+        for (const s of subs) {
+          void player.loadExternalSubtitle(s).catch((err) => console.warn('[subtitle] 装载失败', err))
+        }
+        if (subs.length) console.info(`[subtitle] 外挂字幕已装载:${subs.length} 条`)
       } catch (e) {
         if (cancelled) return
         setStatus('error')
@@ -406,6 +412,7 @@ export default function PlayerLite() {
       } catch { /* ignore */ }
       void player?.destroy().catch(() => {})
       playerRef.current = null
+      extSubsPRef.current = null
     }
   }, [api, itemId])
 
