@@ -15,10 +15,11 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import AVPlayer, { Events } from '@libmedia/avplayer'
 import { AVCodecID } from '@libmedia/avutil/enum'
 import { useApp } from '../state'
+import { loadPlaySession } from '../player/session'
 import type { BaseItem, MediaSource, MediaStream } from '../api/types'
 import { buildDeviceProfile, isAudioLocallyDecodable, pickPreferredAudioIndex } from '../player/deviceProfile'
 import { fetchSubtitleText, toFixedFormatAss, setBilingualStripPref, getBilingualStripPref, stripJapaneseEvents } from '../player/subtitles'
@@ -78,7 +79,20 @@ interface ExtSubInfo {
 export default function PlayerLite() {
   const navigate = useNavigate()
   const { id: itemId = '' } = useParams<{ id: string }>()
-  const { api } = useApp()
+  const [searchParams] = useSearchParams()
+  const { api: sharedApi } = useApp()
+
+  // 备用线路:详情页"备用线路"按钮把反代地址写进播放会话,这里克隆 api
+  // 让播放链路所有请求(PlaybackInfo/媒体流/字幕/进度)都走该反代
+  const viaMirror = useMemo(() => {
+    const sid = searchParams.get('session')
+    const sess = sid ? loadPlaySession(sid) : null
+    return sess?.srv ?? ''
+  }, [searchParams])
+  const api = useMemo(
+    () => (viaMirror ? sharedApi.withServer(viaMirror) : sharedApi),
+    [sharedApi, viaMirror],
+  )
 
   const surfaceRef = useRef<HTMLDivElement | null>(null)
   const playerRef = useRef<AVPlayer | null>(null)
@@ -102,7 +116,7 @@ export default function PlayerLite() {
   const [src, setSrc] = useState<SrcInfo | null>(null)
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [errText, setErrText] = useState('')
-  const [stage, setStage] = useState('正在建立播放链路…')
+  const [stage, setStage] = useState(() => (viaMirror ? '正在建立播放链路(备用线路)…' : '正在建立播放链路…'))
   const [badge, setBadge] = useState('')
   // 控制栏状态
   const [paused, setPaused] = useState(false)

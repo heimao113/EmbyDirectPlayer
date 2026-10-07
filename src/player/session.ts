@@ -6,6 +6,8 @@ export interface PlaySession {
   itemId: string
   /** direct=原画直连;transcode=服务器转码 */
   mode: 'direct' | 'transcode'
+  /** 备用反代线路完整地址;不填走主站 */
+  srv?: string
   created: number
 }
 

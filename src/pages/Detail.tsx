@@ -3,7 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useApp } from '../state'
 import { createPlaySession } from '../player/session'
 import { buildDeviceProfile, detectAc3Support } from '../player/deviceProfile'
-import type { BaseItem, MediaSource } from '../api/types'
+import { MIRROR_SERVER, normalizeServer } from '../api/emby'
+import type { BaseItem } from '../api/types'
 
 function fmtTicks(ticks?: number): string {
   if (!ticks) return '0:00'
@@ -24,10 +25,29 @@ export default function Detail() {
   const [episodes, setEpisodes] = useState<BaseItem[]>([])
   const [asc, setAsc] = useState(true)
   const [error, setError] = useState('')
-  const [playTarget, setPlayTarget] = useState<BaseItem | null>(null)
-  const [showPlayDialog, setShowPlayDialog] = useState(false)
-  const [playMode, setPlayMode] = useState<'direct' | 'transcode'>('transcode')
-  const [directBad, setDirectBad] = useState(false)
+
+  // 直接开播(去掉选版本弹窗):剧集解析第一集,srv 传入备用反代线路
+  const startPlay = async (srv?: string) => {
+    if (!item) return
+    let target = item
+    if (item.Type === 'Series') {
+      const s1 = seasons.find((s) => s.IndexNumber === 1) ?? seasons[0]
+      if (!s1) return
+      const eps = await api.episodes(item.Id, s1.Id).catch(() => [])
+      const first = eps.find((e) => !e.UserData?.Played) ?? eps[0]
+      if (!first) return
+      target = first
+    }
+    const sid = createPlaySession({ itemId: target.Id, mode: 'direct', srv: srv ? normalizeServer(srv) : undefined })
+    navigate(`/play/${target.Id}?session=${sid}`)
+  }
+  const playLabel = item
+    ? item.Type === 'Series'
+      ? '立即播放'
+      : (item.UserData?.PlaybackPositionTicks ?? 0) > 0
+        ? `继续播放 ${Math.round(((item.UserData?.PlaybackPositionTicks ?? 0) / (item.RunTimeTicks || 1)) * 100)}%`
+        : '立即播放'
+    : '立即播放'
 
 
   useEffect(() => {
@@ -62,7 +82,6 @@ export default function Detail() {
   if (error) return <div className="page-error">加载失败:{error}</div>
   if (!item) return <div className="page-loading">加载中…</div>
 
-  const pos = item.UserData?.PlaybackPositionTicks ?? 0
   const isMovie = item.Type === 'Movie'
   const meta = [
     item.CommunityRating ? `★ ${item.CommunityRating.toFixed(1)}` : '',
@@ -99,93 +118,20 @@ export default function Detail() {
             </div>
             {item.Overview && <p className="detail-overview">{item.Overview}</p>}
             {(isMovie || item.Type === 'Episode' || item.Type === 'Video' || item.Type === 'Series') && (
-              <div className="detail-actions">
-                <button
-                  className="cta-primary"
-                  onClick={async () => {
-                    // 剧集:播第 1 季第一集(没有就全局第一集)
-                    let target = item
-                    if (item.Type === 'Series') {
-                      const s1 = seasons.find((s) => s.IndexNumber === 1) ?? seasons[0]
-                      if (!s1) return
-                      const eps = await api.episodes(item.Id, s1.Id).catch(() => [])
-                      const first = eps.find((e) => !e.UserData?.Played) ?? eps[0]
-                      if (!first) return
-                      target = first
-                    }
-                    setPlayTarget(target)
-                    try {
-                      setDirectBad(JSON.parse(localStorage.getItem('ewp/direct-bad') ?? '[]').includes(target.Id))
-                    } catch { setDirectBad(false) }
-                    setShowPlayDialog(true)
-                  }}
-                >
-                  ▶ {item.Type === 'Series' ? '立即播放' : pos > 0 ? `继续播放 ${Math.round((pos / (item.RunTimeTicks || 1)) * 100)}%` : '立即播放'}
+              <div className="detail-actions-wrap">
+                <div className="detail-actions">
+                  <button className="cta-primary" onClick={() => { void startPlay() }}>
+                    ▶ {playLabel}
+                  </button>
+                  <button className="cta-ghost">♡ 加入收藏</button>
+                </div>
+                <button className="cta-line2" onClick={() => { void startPlay(MIRROR_SERVER) }} title={`经 ${MIRROR_SERVER} 反代播放`}>
+                  ⇄ {playLabel} · 备用线路
                 </button>
-                <button className="cta-ghost">♡ 加入收藏</button>
               </div>
             )}
           </div>
         </div>
-
-        {/* 播放确认弹窗(uhd 式:选版本) */}
-        {showPlayDialog && playTarget && (
-          <div className="play-dialog-mask" onClick={() => setShowPlayDialog(false)}>
-            <div className="play-dialog" onClick={(e) => e.stopPropagation()}>
-              <div className="pd-head" style={{
-                backgroundImage: playTarget.ImageTags?.Primary
-                  ? `url(${api.imageUrl(playTarget.Id, 'Primary', 700)})` : undefined,
-              }}>
-                <div className="pd-head-shade" />
-                <span className="pd-badge">{playTarget.Type === 'Episode' ? '剧集' : '电影'}</span>
-                <h3>{playTarget.Name}</h3>
-                <div className="pd-sub">
-                  {playTarget.SeriesName ? `${playTarget.SeriesName} · ` : ''}
-                  {playTarget.Type === 'Episode' && playTarget.ParentIndexNumber != null
-                    ? `第${playTarget.ParentIndexNumber}季·第${playTarget.IndexNumber ?? '?'}集`
-                    : playTarget.ProductionYear ?? ''}
-                </div>
-              </div>
-              <div className="pd-body">
-                <div className="pd-label">版本</div>
-                {directBad && <div className="pd-hint">⚠ 该片上次原画直连播放失败,重试或反馈给我们</div>}
-                {(() => {
-                  const ms: MediaSource | undefined = playTarget.MediaSources?.[0]
-                  const v = ms?.MediaStreams?.find((x) => x.Type === 'Video')
-                  const a = ms?.MediaStreams?.find((x) => x.Type === 'Audio')
-                  const res = v?.Height ? `${v.Height >= 2160 ? '2160P' : v.Height >= 1080 ? '1080P' : `${v.Height}P`}` : '原画'
-                  const codec = (v?.Codec ?? '').toUpperCase()
-                  const br = v?.BitRate ? `${(v.BitRate / 1_000_000).toFixed(1)} Mbps` : ''
-                  const dur = fmtTicks(playTarget.RunTimeTicks)
-                  const aBr = a?.BitRate ? `${Math.round(a.BitRate / 1000)} kbps` : ''
-                  return (
-                    <>
-                      <button
-                        className={`pd-card ${playMode === 'direct' ? 'active' : ''}`}
-                        onClick={() => setPlayMode('direct')}
-                      >
-                        <span className="pd-check">{playMode === 'direct' ? '✓' : ''}</span>
-                        <span className="pd-card-main">
-                          <b>原画直连 {res}</b>
-                          <span className="pd-tags">{[res, codec, br, aBr, dur].filter(Boolean).map((t, i) => <em key={i}>{t}</em>)}</span>
-                        </span>
-                      </button>
-                    </>
-                  )
-                })()}
-                <button
-                  className="pd-start"
-                  onClick={() => {
-                    const id = createPlaySession({ itemId: playTarget.Id, mode: playMode })
-                    navigate(`/play/${playTarget.Id}?session=${id}`)
-                  }}
-                >
-                  ▶ 开始播放 · 原画直连
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
 
         {item.Type === 'Series' && (
           <div className="episodes">

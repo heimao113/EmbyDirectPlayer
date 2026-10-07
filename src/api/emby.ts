@@ -42,11 +42,25 @@ export function normalizeServer(input: string): string {
   return s
 }
 
+/** 备用反代线路(同一台 Emby 的另一条出口),详情页"备用线路"按钮使用 */
+export const MIRROR_SERVER = 'https://emby1.heimao.dpdns.org'
+
 export class EmbyApi {
   constructor(
     private getAuth: () => AuthInfo | null,
     private onUnauthorized: () => void,
   ) {}
+
+  /** 克隆一个把服务器基址换成备用线路的实例(共用同一份登录态) */
+  withServer(server: string): EmbyApi {
+    return new EmbyApi(
+      () => {
+        const a = this.getAuth()
+        return a ? { ...a, server: normalizeServer(server) } : a
+      },
+      this.onUnauthorized,
+    )
+  }
 
   private mustAuth(): AuthInfo {
     const a = this.getAuth()
