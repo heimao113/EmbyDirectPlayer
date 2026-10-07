@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 420 120" width="420" height="120">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0d1117"/>
+      <stop offset="100%" stop-color="#161b22"/>
+    </linearGradient>
+  </defs>
+  <rect width="420" height="120" rx="14" fill="url(#bg)"/>
+
+  <!-- ===== 文字 heimao の emby ===== -->
+  <!-- 用粗体无衬线,文字通过 SVG text 绘制 -->
+  <text x="28" y="82" font-family="'Arial Black','Noto Sans SC',sans-serif" font-size="56" font-weight="900" fill="#e8eaef" letter-spacing="-1">heimao</text>
+  <text x="228" y="82" font-family="'Noto Sans SC','Yu Gothic','Hiragino Sans',sans-serif" font-size="48" font-weight="700" fill="#ff6b9d">の</text>
+  <text x="282" y="82" font-family="'Arial Black','Noto Sans SC',sans-serif" font-size="56" font-weight="900" fill="#e8eaef" letter-spacing="-1">emby</text>
+
+  <!-- ===== 黑猫剪影:攀附在 h 字母上,尾巴延伸到 emby 的 o ===== -->
+  <!-- 黑猫形体:半透明纯黑,不留实体细节,只有轮廓 -->
+
+  <!-- 猫头(在 h 的顶部,探出头的感觉) -->
+  <path d="M 42 22
+           C 42 10, 52 4, 64 6
+           C 72 7, 78 14, 78 24
+           C 78 32, 74 38, 68 41
+           C 62 44, 54 43, 49 38
+           C 45 33, 42 28, 42 22 Z"
+        fill="#0a0a0f" opacity="0.85"/>
+
+  <!-- 左耳 -->
+  <path d="M 46 14 L 42 2 L 56 10 Z" fill="#0a0a0f" opacity="0.85"/>
+  <!-- 右耳 -->
+  <path d="M 68 8 L 78 0 L 78 14 Z" fill="#0a0a0f" opacity="0.85"/>
+
+  <!-- 猫眼(两点绿色微光) -->
+  <circle cx="56" cy="22" r="2.2" fill="#4ade80" opacity="0.7"/>
+  <circle cx="68" cy="22" r="2.2" fill="#4ade80" opacity="0.7"/>
+
+  <!-- 身体:从 h 的柱子往下流,弧线连接到 emby 的 o -->
+  <path d="M 48 38
+           C 48 55, 56 68, 72 74
+           C 95 82, 120 80, 145 84
+           C 175 88, 205 92, 235 88
+           C 262 85, 285 82, 305 84
+           C 325 86, 345 84, 355 78
+           C 365 72, 368 62, 362 56
+           C 357 51, 349 52, 346 58"
+        fill="none" stroke="#0a0a0f" stroke-width="8" stroke-linecap="round" opacity="0.5"/>
+
+  <!-- 尾巴:末端卷到 emby 的 o 字母中间,形成一个圆环 -->
+  <path d="M 362 56
+           C 358 48, 350 44, 340 46
+           C 332 48, 330 56, 336 62
+           C 340 66, 348 66, 351 60"
+        fill="none" stroke="#0a0a0f" stroke-width="7" stroke-linecap="round" opacity="0.5"/>
+
+  <!-- 尾巴尖端:小圆球 -->
+  <circle cx="343" cy="61" r="5" fill="#0a0a0f" opacity="0.5"/>
+
+  <!-- 爪子搭在 h 柱子上的痕迹(小圆点) -->
+  <circle cx="48" cy="34" r="3" fill="#0a0a0f" opacity="0.5"/>
+
+  <!-- の 字符上的猫爪印 -->
+  <path d="M 248 78 l 3 -3 M 252 79 l 2 -4" stroke="#ff6b9d" stroke-width="1.5" opacity="0.4"/>
+
+</svg>

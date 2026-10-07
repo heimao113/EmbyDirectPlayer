@@ -35,7 +35,7 @@ export default function Header() {
   return (
     <header className="app-header" onClick={() => setSettingsOpen(false)}>
       <span className="logo" onClick={() => navigate('/')}>
-        <span className="logo-dot" />Emby Player
+        <img src="/logo-heimao.png" alt="heimaoのemby" style={{ height: '34px', borderRadius: '6px' }} />
       </span>
 
       <nav className="nav-pills">
