@@ -463,6 +463,40 @@ export default function PlayerLite() {
     }
   }, [src, prepareExternalSubs])
 
+  // ---------- 自动选字幕:中文优先(内嵌多字幕轨时) ----------
+  useEffect(() => {
+    if (status !== 'ready') return
+    const t = setTimeout(() => {
+      const ui = playerRef.current
+      if (!ui) return
+      try {
+        const streams = (ui.getStreams?.() ?? []) as unknown as Array<{
+          id: number
+          index?: number
+          codecparProxy?: { codecType?: unknown }
+          metadata?: { language?: string; title?: string }
+          disposition?: number
+        }>
+        const subs = streams.filter((s) => Number(s.codecparProxy?.codecType) === 3)
+        if (subs.length === 0) return
+        const langOf = (s: (typeof subs)[number]) => String(s.metadata?.language ?? '').toLowerCase()
+        const titleOf = (s: (typeof subs)[number]) => String(s.metadata?.title ?? '')
+        const isZh = (s: (typeof subs)[number]) =>
+          langOf(s).startsWith('zh') || /chs|简|sc/i.test(titleOf(s))
+        const zh = subs.find((s) => isZh(s) && !(s.disposition ?? 0)) ?? subs.find(isZh)
+        const def = subs.find((s) => (s.disposition ?? 0) & 1)
+        const target = zh ?? def ?? subs[0]
+        if (!target) return
+        const cur = ui.getSelectedSubtitleStreamId?.() ?? -1
+        if (target.id !== cur) {
+          void ui.selectSubtitle(target.id).catch(() => {})
+          console.info(`[subtitle] 自动选择:id ${target.id} (${langOf(target) || titleOf(target) || '无标记'})`)
+        }
+      } catch { /* ignore */ }
+    }, 1200)
+    return () => clearTimeout(t)
+  }, [status, itemId])
+
   // 卸载:停止上报 + 销毁
   useEffect(() => {
     return () => {
