@@ -292,6 +292,7 @@ export default function Player() {
   const streamFallbackUsedRef = useRef(false)
   const audioStallRef = useRef(0)
   const hasAudioStreamRef = useRef(true)
+  const lastSubRef = useRef<number | null>(null)
   const audioReloadRef = useRef({ count: 0, lastAt: 0 })
 
   const lastNativeSubIdRef = useRef<number | null>(null)
@@ -1227,6 +1228,17 @@ export default function Player() {
           setVolume(v || volume)
           break
         }
+        case 'c':
+        case 'C': {
+          // 字幕开关:开着就关,关了恢复上一次的轨
+          if (activeSubRef.current !== null) {
+            lastSubRef.current = activeSubRef.current
+            void applySubtitle(null)
+          } else {
+            void applySubtitle(lastSubRef.current)
+          }
+          break
+        }
         case 'Escape':
           if (!document.fullscreenElement) navigate(-1)
           break
@@ -1234,7 +1246,7 @@ export default function Player() {
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [togglePlay, seekBy, toggleFullscreen, navigate, volume, muted])
+  }, [togglePlay, seekBy, toggleFullscreen, navigate, volume, muted, applySubtitle])
 
   // 自动隐藏控制栏
   useEffect(() => {
