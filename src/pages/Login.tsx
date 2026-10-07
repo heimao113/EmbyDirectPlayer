@@ -3,7 +3,7 @@ import { Navigate, useNavigate } from 'react-router-dom'
 import { useApp } from '../state'
 
 /** 注册地址:自己的注册页,改这里即可 */
-const REGISTER_URL = 'https://www.uhdnow.com/signup'
+const REGISTER_URL = 'https://yh.heimao.dpdns.org/'
 /** 找回密码:Emby 官方找回流程 */
 const forgotUrl = (server: string) => `${server}/emby/web/index.html#!/startup/forgotpassword.html`
 
