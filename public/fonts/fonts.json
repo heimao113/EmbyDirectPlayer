@@ -1,0 +1,11 @@
+{
+  "fallback": "思源黑体",
+  "fonts": [
+    { "family": "思源黑体", "url": "/fonts/SourceHanSansSC-Regular.subset.woff2", "default": true },
+    { "family": "Source Han Sans SC", "url": "/fonts/SourceHanSansSC-Regular.subset.woff2" },
+    { "family": "思源黑体 CN", "url": "/fonts/SourceHanSansSC-Regular.subset.woff2" },
+    { "family": "Source Han Sans CN", "url": "/fonts/SourceHanSansSC-Regular.subset.woff2" },
+    { "family": "Noto Sans CJK SC", "url": "/fonts/SourceHanSansSC-Regular.subset.woff2" },
+    { "family": "Liberation Sans", "url": "/fonts/default.woff2" }
+  ]
+}
