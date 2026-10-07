@@ -1,9 +1,7 @@
 import { useState } from 'react'
 import { Navigate, useNavigate } from 'react-router-dom'
 import { useApp } from '../state'
-
-/** 注册地址:自己的注册页,改这里即可 */
-const REGISTER_URL = 'https://yh.heimao.dpdns.org/'
+import { REGISTER_URL } from '../config'
 
 export default function Login() {
   const { auth, api, signIn } = useApp()

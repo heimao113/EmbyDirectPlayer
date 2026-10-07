@@ -8,7 +8,6 @@ import Detail from './pages/Detail'
 import PlayerLite from './pages/PlayerLite'
 // 官方 AVPlayerUI 播放页实验:UI 不透传 findBestStream,AAC 声道修复无法注入,
 // 暂不上线。文件保留在 src/pages/PlayerUIPage.tsx 待 libmedia 修复后评估
-// import PlayerUIPage from './pages/PlayerUIPage'
 
 function RequireAuth() {
   const { auth } = useApp()

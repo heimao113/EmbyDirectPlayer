@@ -3,7 +3,8 @@ import { useNavigate, useParams } from 'react-router-dom'
 import { useApp } from '../state'
 import { createPlaySession } from '../player/session'
 import { buildDeviceProfile, detectAc3Support } from '../player/deviceProfile'
-import { MIRROR_SERVER, normalizeServer } from '../api/emby'
+import { normalizeServer } from '../api/emby'
+import { MIRROR_SERVER } from '../config'
 import type { BaseItem } from '../api/types'
 
 function fmtTicks(ticks?: number): string {

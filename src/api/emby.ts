@@ -42,8 +42,6 @@ export function normalizeServer(input: string): string {
   return s
 }
 
-/** 备用反代线路(同一台 Emby 的另一条出口),详情页"备用线路"按钮使用 */
-export const MIRROR_SERVER = 'https://emby1.heimao.dpdns.org'
 
 export class EmbyApi {
   constructor(
