@@ -131,12 +131,14 @@ export default function PlayerLite() {
     aMbps: string
     pipeline: 'MSE' | 'WASM'
     dropped: number
+    decodeLabel: string
   } | null>(null)
   // 进度条拖动状态:拖动中显示预览位置,提交后锁定直到播放追上(不回跳)
   const [seekDragging, setSeekDragging] = useState(false)
   const [seekPreview, setSeekPreview] = useState(0)
   const seekLockRef = useRef<{ target: number; until: number } | null>(null)
   const bitrateHistRef = useRef<number[]>([])
+  const rxPrevRef = useRef<{ bytes: number; t: number } | null>(null)
   const hideTimerRef = useRef<number | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
 
@@ -638,10 +640,21 @@ export default function PlayerLite() {
       const emby = ms?.MediaStreams ?? []
       const vEm = emby.find((x) => x.Type === 'Video')
       const aEm = emby.find((x) => x.Type === 'Audio' && x.IsDefault) ?? emby.find((x) => x.Type === 'Audio')
-      const vMbps = Number(st?.videoBitrate ?? 0) / 1_000_000
-      const aMbps = Number(st?.audioBitrate ?? 0) / 1_000_000
-      const mbps = vMbps + aMbps
-      bitrateHistRef.current = [...bitrateHistRef.current.slice(-39), mbps]
+      // MSE 管线解码由浏览器完成,libmedia 的解码帧率恒为 0 —— 这是正常现象;
+      // 码率改用 IO 字节增量计算(两种管线都准确)
+      const isMSE = !!surfaceRef.current?.querySelector('video')
+      const rx = Number(st?.bufferReceiveBytes ?? 0)
+      const now = performance.now()
+      const prev = rxPrevRef.current
+      let mbps = 0
+      if (prev && now > prev.t && rx >= prev.bytes) {
+        mbps = ((rx - prev.bytes) * 8) / ((now - prev.t) / 1000) / 1_000_000
+      }
+      rxPrevRef.current = { bytes: rx, t: now }
+      const vMbps = isMSE ? mbps : Number(st?.videoBitrate ?? 0) / 1_000_000
+      const aMbps = 0
+      const mbpsTotal = isMSE ? mbps : vMbps + aMbps
+      bitrateHistRef.current = [...bitrateHistRef.current.slice(-39), mbpsTotal]
       setDiag({
         container: (ms?.Container ?? 'MKV').toUpperCase(),
         vCount,
@@ -655,11 +668,12 @@ export default function PlayerLite() {
         aCh: Number(aEm?.Channels ?? 0),
         aDec: Math.round(Number(st?.audioDecodeFramerate ?? 0)),
         aRen: Math.round(Number(st?.audioRenderFramerate ?? 0)),
-        mbps: mbps.toFixed(1),
+        mbps: mbpsTotal.toFixed(1),
         vMbps: vMbps.toFixed(1),
         aMbps: (aMbps * 1000).toFixed(0),
-        pipeline: (ui as unknown as { useMSE?: boolean }).useMSE ? 'MSE' : 'WASM',
+        pipeline: isMSE ? 'MSE' : 'WASM',
         dropped: Number(st?.videoFrameDropCount ?? 0),
+        decodeLabel: isMSE ? '浏览器解码' : 'WASM 软解',
       })
     }
     collect()
@@ -822,8 +836,8 @@ export default function PlayerLite() {
                 />
               </svg>
               <div className="ui-diag-sec">解码</div>
-              <div className="ui-diag-v strong">{diag.vCodec} · {diag.width}×{diag.height} · {diag.fps.toFixed(2)}fps</div>
-              <div className="ui-diag-v dim">音频 {diag.aCodec}{diag.aCh ? ` ${diag.aCh}ch` : ''} · 解码 {diag.aDec} fps · 渲染 {diag.aRen} fps</div>
+              <div className="ui-diag-v strong">{diag.vCodec} · {diag.width}×{diag.height}{diag.pipeline === 'WASM' ? ` · ${diag.fps.toFixed(2)}fps` : ''}</div>
+              <div className="ui-diag-v dim">音频 {diag.aCodec}{diag.aCh ? ` ${diag.aCh}ch` : ''} · {diag.decodeLabel}</div>
               <div className="ui-diag-sec">渲染</div>
               <div className="ui-diag-v">{diag.pipeline === 'MSE' ? '播放器 MSE 画面' : '播放器自渲染画面'}</div>
               <div className="ui-diag-sec">显示</div>
