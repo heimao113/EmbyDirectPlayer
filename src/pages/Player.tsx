@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { loadPlaySession } from '../player/session'
 import { useApp } from '../state'
 import { buildDeviceProfile, detectAc3Support } from '../player/deviceProfile'
-import { fetchSubtitleText, toUnifiedAss, assToVtt, parseAssCues, cuesToSrt, type SubCue } from '../player/subtitles'
+import { fetchSubtitleText, toUnifiedAss, assToVtt, parseAssCues, cuesToSrt, sniffSubtitleFormat, type SubCue } from '../player/subtitles'
 import { loadFontManifest, registerFontFaces, toJassubFontConfig } from '../player/fonts'
 import { JassubHost } from '../player/jassubHost'
 import { Engine, type EngineStream, type PipelineKind } from '../player/engine'
@@ -51,8 +51,10 @@ const T = (ticks?: number | null) => (ticks ?? 0) / 10_000_000 // ticks → 秒
 
 function buildSubTrack(stream: MediaStream, itemId: string, msId: string): SubTrack {
   const codec = (stream.Codec ?? '').toLowerCase()
-  const graphic = ['pgs', 'hdmv_pgs_subtitle', 'dvd_subtitle', 'dvdsub', 'dvbsub', 'vobsub'].includes(codec)
-  const isText = !graphic && ['ass', 'ssa', 'srt', 'subrip', 'vtt', 'webvtt', 'ttml'].includes(codec)
+  // 位图字幕:libass 画不了,交 libmedia 原生渲染(pgssub 是 Emby 对 PGS 的常见写法,勿漏)
+  const graphic = ['pgs', 'pgssub', 'hdmv_pgs_subtitle', 'dvd_subtitle', 'dvdsub', 'dvbsub', 'vobsub', 'sup'].includes(codec)
+  // 其余编码按文本轨处理,具体格式由内容嗅探决定(不信任 Emby 的 Codec 字段)
+  const isText = !graphic
   const lang = stream.Language ? `[${stream.Language}] ` : ''
   const label = `${lang}${stream.DisplayTitle ?? stream.Title ?? `轨道 ${stream.Index}`}`
   return {
@@ -331,7 +333,9 @@ export default function Player() {
           return
         }
         const s = srcRef.current
-        if (s?.kind === 'direct') {
+        // direct 与 direct-stream(TrueHD 等音频兜底 remux)都是 libmedia 直连 MKV,
+        // 字幕主路径相同:文本轨 JASSUB,位图轨 libmedia
+        if (s?.kind === 'direct' || s?.kind === 'direct-stream') {
           const lm = engine
             .streams()
             .find((x) => x.mediaType === 'subtitle' && x.index === track.index)
@@ -348,45 +352,80 @@ export default function Player() {
             return
           }
           if (engine instanceof Engine) {
-            // 文本轨 → JASSUB(libass)接管:还原度高于 libmedia 内置渲染;
-            // 字幕内容走 Emby 提取接口(demux 出的轨不带完整 Style)
+            // 文本轨 → JASSUB(libass)接管;内容走 Emby 提取接口(demux 出的轨不带完整 Style)。
+            // 单轨失败(提取空/格式坏)自动按"同语言优先"尝试其它文本轨,最多 3 条,
+            // 任何一条轨失败都不拖垮字幕系统
             const vs = engine.streams().find((x) => x.mediaType === 'video')
-            const raw = await fetchSubTextCached(track)
-            const unified = toUnifiedAss(raw, vs?.width || 1280, vs?.height || 720)
-            setTrCues(parseAssCues(unified)) // 文稿面板数据
-            if (!surfaceRef.current) return
-            const cfg = toJassubFontConfig(await loadFontManifest())
+            const attachText = async (t: SubTrack): Promise<void> => {
+              const t0 = performance.now()
+              const raw = await fetchSubTextCached(t)
+              const detected = sniffSubtitleFormat(raw)
+              const unified = toUnifiedAss(raw, vs?.width || 1280, vs?.height || 720)
+              const cues = parseAssCues(unified)
+              setTrCues(cues) // 文稿面板数据
+              if (!surfaceRef.current) return
+              const cfg = toJassubFontConfig(await loadFontManifest())
+              try {
+                await getJassub().attach({
+                  surface: surfaceRef.current,
+                  assContent: unified,
+                  availableFonts: cfg.availableFonts,
+                  defaultFont: cfg.fallback || 'sans-serif',
+                  video:
+                    pipelineRef.current === 'mse'
+                      ? engine.attachPoint().video
+                      : undefined,
+                  getSec: () => engine.currentSec(),
+                  videoWidth: vs?.width,
+                  videoHeight: vs?.height,
+                  fonts: engine.embeddedFonts(),
+                })
+              } catch (e) {
+                // JASSUB 起不来(环境不支持 worker 渲染等)→ 回退 libmedia 原生渲染
+                console.warn('[subtitle] JASSUB 不可用,回退内置渲染', e)
+                await engine.setNativeSubtitleEnabled(false)
+                const lm2 = engine
+                  .streams()
+                  .find((x) => x.mediaType === 'subtitle' && x.index === t.index)
+                if (lm2 && lastNativeSubIdRef.current !== lm2.id) {
+                  await engine.setNativeSubtitleEnabled(true)
+                  await engine.selectSubtitle(lm2.id)
+                  lastNativeSubIdRef.current = lm2.id
+                }
+                return
+              }
+              console.info(
+                `[subtitle] track=${t.index} codec=${t.codec} bytes=${raw.length} ` +
+                `detect=${detected} events=${cues.length} renderer=JASSUB ` +
+                `fonts=${engine.embeddedFonts().length} elapsed=${Math.round(performance.now() - t0)}ms`,
+              )
+            }
             try {
-              await getJassub().attach({
-                surface: surfaceRef.current,
-                assContent: unified,
-                availableFonts: cfg.availableFonts,
-                defaultFont: cfg.fallback || 'sans-serif',
-                video:
-                  pipelineRef.current === 'mse'
-                    ? engine.attachPoint().video
-                    : undefined,
-                getSec: () => engine.currentSec(),
-                videoWidth: vs?.width,
-                videoHeight: vs?.height,
-                fonts: engine.embeddedFonts(),
-              })
+              await attachText(track)
               setSubError('')
               return
             } catch (e) {
-              // JASSUB 起不来(环境不支持 worker 渲染等)→ 回退 libmedia 原生渲染
-              console.warn('[player] JASSUB 不可用,回退内置渲染', e)
+              console.warn(`[subtitle] track=${track.index} 加载失败:`, e instanceof Error ? e.message : e)
             }
-            await engine.setNativeSubtitleEnabled(false)
-            const lm2 = engine
-              .streams()
-              .find((x) => x.mediaType === 'subtitle' && x.index === track.index)
-            if (lm2 && lastNativeSubIdRef.current !== lm2.id) {
-              await engine.setNativeSubtitleEnabled(true)
-              await engine.selectSubtitle(lm2.id)
-              lastNativeSubIdRef.current = lm2.id
+            // 请求轨失败 → 其它文本轨兜底(同语言优先,最多 3 条)
+            const langOf = (t: SubTrack) => (t.label.match(/\[([^\]]+)\]/)?.[1] ?? '').toLowerCase()
+            const wantLang = langOf(track)
+            const others = subs
+              .filter((t) => t.index !== track.index && !t.isGraphic)
+              .sort((a, b) => Number(langOf(b) === wantLang) - Number(langOf(a) === wantLang))
+              .slice(0, 3)
+            for (const cand of others) {
+              try {
+                await attachText(cand)
+                setSubError(`轨 ${track.index} 不可用,已自动切换到轨 ${cand.index}`)
+                console.warn(`[subtitle] 轨 ${track.index} 失败,已回退到轨 ${cand.index}`)
+                return
+              } catch (e) {
+                console.warn(`[subtitle] 备选轨 ${cand.index} 也失败:`, e instanceof Error ? e.message : e)
+              }
             }
-            setSubError('')
+            setStatus('error')
+            setErrorMsg(`字幕轨 ${track.index} 无法加载,且没有可用的备选文本轨`)
             return
           }
           // 原生 mp4 引擎:ASS → VTT 挂 <video> 文本轨
