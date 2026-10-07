@@ -113,6 +113,7 @@ export default function PlayerLite() {
   // 触屏设备:视频区单击 = 呼出控制栏(桌面单击 = 暂停)
   const coarsePointerRef = useRef(typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches)
   const lastTapRef = useRef(0)
+  const lastUiTickRef = useRef(0)
   const jassubRef = useRef<JassubHost | null>(null)
   const embeddedFontsRef = useRef<Uint8Array[] | null>(null)
   const lastAssRef = useRef<{ content: string; vw: number; vh: number } | null>(null)
@@ -398,6 +399,10 @@ export default function PlayerLite() {
             return
           }
         }
+        // 节流:时间事件 ~4Hz,整树重渲染在低端手机上会引发控制栏闪烁,限到 ~2.5Hz
+        const nowMs = Date.now()
+        if (nowMs - lastUiTickRef.current < 400) return
+        lastUiTickRef.current = nowMs
         setCur(nowSec)
         const d = player.getDuration()
         setDur(d > 0n ? Number(d) / 1000 : 0)

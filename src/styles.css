@@ -303,6 +303,8 @@ input {
   top: 0;
   left: 0;
   right: 0;
+  transform: translateZ(0);
+  will-change: opacity;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -378,6 +380,8 @@ input {
 .ui-controls {
   position: absolute;
   left: 0; right: 0; bottom: 0;
+  transform: translateZ(0);
+  will-change: opacity;
   padding: 26px 18px 12px;
   background: linear-gradient(to top, rgba(0, 0, 0, 0.72), transparent);
   z-index: 20;
@@ -1301,6 +1305,8 @@ canvas.JASSUB { pointer-events: none !important; }
   top: 0;
   left: 0;
   right: 0;
+  transform: translateZ(0);
+  will-change: opacity;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -1376,6 +1382,8 @@ canvas.JASSUB { pointer-events: none !important; }
 .ui-controls {
   position: absolute;
   left: 0; right: 0; bottom: 0;
+  transform: translateZ(0);
+  will-change: opacity;
   padding: 26px 18px 12px;
   background: linear-gradient(to top, rgba(0, 0, 0, 0.72), transparent);
   z-index: 20;
@@ -1549,4 +1557,8 @@ canvas.JASSUB { pointer-events: none !important; }
   .ui-progress-row input[type="range"] { height: 24px; }
 
   .login-brand-img { max-width: 72vw; }
+}
+
+@media (max-width: 768px) {
+  .ui-controls, .ui-top, .back-pill, .ui-badge { transition: none !important; transform: translateZ(0); }
 }
