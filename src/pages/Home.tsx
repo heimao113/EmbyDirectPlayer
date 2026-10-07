@@ -96,11 +96,6 @@ export default function Home() {
   ].filter(Boolean)
   const heroAction = hero ? `/item/${hero.Id}` : ''
 
-  const heroGo = (dir: 1 | -1) => {
-    if (!heroes.length) return
-    setHeroIdx((i) => (i + dir + heroes.length) % heroes.length)
-  }
-
   return (
     <div className="home-page">
       {hero && (
@@ -108,29 +103,27 @@ export default function Home() {
           {heroImg && <div className="hero-bg" style={{ backgroundImage: `url(${heroImg})` }} />}
           <div className="hero-shade" />
           <div className="hero-content">
-            <div className="hero-badge">热播推荐 <span className="hero-idx">{String(heroIdx + 1).padStart(2, '0')} / {String(heroes.length).padStart(2, '0')}</span></div>
             <h1 className="hero-title">{heroTitle}</h1>
             {heroMeta.length > 0 && (
               <div className="hero-meta">{heroMeta.map((m, i) => <span key={i}>{m}</span>)}</div>
             )}
             {hero.Overview && <p className="hero-overview">{hero.Overview}</p>}
             <div className="hero-actions">
-              <button className="hero-cta" onClick={() => navigate(heroAction)}>▶ 立即观看</button>
+              <button className="hero-cta" onClick={() => navigate(heroAction)}>▶ 播放</button>
+              <button className="hero-sub" onClick={() => navigate(heroAction)}>详细</button>
             </div>
           </div>
-          <img src="/stream/brand-cat-tail.png" alt="" className="hero-tail" />
           {heroes.length > 1 && (
-            <>
-              <div className="hero-arrows">
-                <button className="hero-arrow" onClick={() => heroGo(-1)}>‹</button>
-                <button className="hero-arrow" onClick={() => heroGo(1)}>›</button>
-              </div>
-              <div className="hero-dots">
-                {heroes.map((_, i) => (
-                  <button key={i} className={`hero-dot ${i === heroIdx ? 'active' : ''}`} onClick={() => setHeroIdx(i)} />
-                ))}
-              </div>
-            </>
+            <div className="hero-picker">
+              {heroes.map((h, i) => (
+                <button
+                  key={h.Id}
+                  className={`hero-thumb ${i === heroIdx ? 'active' : ''}`}
+                  style={{ backgroundImage: `url(${h.ImageTags?.Primary ? api.imageUrl(h.Id, 'Primary', 120) : ''})` }}
+                  onClick={() => setHeroIdx(i)}
+                />
+              ))}
+            </div>
           )}
         </div>
       )}
@@ -190,16 +183,6 @@ export default function Home() {
         </section>
       ))}
 
-      {latest.length > 0 && (
-        <section>
-          <h2>最新添加 <span className="count">{latest.length}</span></h2>
-          <div className="poster-row">
-            {latest.map((it) => (
-              <PosterCard key={it.Id} item={it} width={140} />
-            ))}
-          </div>
-        </section>
-      )}
     </div>
   )
 }
