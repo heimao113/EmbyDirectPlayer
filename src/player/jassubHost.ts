@@ -37,6 +37,13 @@ export class JassubHost {
   private raf = 0
   private seq = 0
   private ro: ResizeObserver | null = null
+  /** 诊断用:'attaching' | 'ready' | 'failed' + 失败原因 */
+  private state: 'idle' | 'attaching' | 'ready' | 'failed' = 'idle'
+  private lastErr = ''
+
+  getStatus(): { state: 'idle' | 'attaching' | 'ready' | 'failed'; lastErr: string } {
+    return { state: this.state, lastErr: this.lastErr }
+  }
 
   get active(): boolean {
     return this.inst !== null
@@ -44,6 +51,8 @@ export class JassubHost {
 
   async attach(o: JassubAttachOptions): Promise<void> {
     await this.detach()
+    this.state = 'attaching'
+    this.lastErr = ''
     const mySeq = ++this.seq
 
     const canvas = document.createElement('canvas')
@@ -71,6 +80,8 @@ export class JassubHost {
     } catch (e) {
       canvas.remove()
       this.canvas = null
+      this.state = 'failed'
+      this.lastErr = String(e instanceof Error ? e.message : e).slice(0, 160)
       throw e
     }
     if (mySeq !== this.seq) {
@@ -85,17 +96,20 @@ export class JassubHost {
     // worker 侧画布尺寸停在构造时的默认值,必须 ready 后显式 resize() 校准;
     // renderer 在 ready 完成前是 undefined,绝不能提前喂数据(上次弃用的"竞态"即此)
     try {
-      // ready 挂起(如无头环境/异常环境 worker 握手失败)时按超时放弃,
+      // ready 挂起(如 worker 握手失败/wasm 加载慢)时按超时放弃,
       // 上层回退 libmedia 原生字幕渲染,保证任何环境下字幕都可见
       const outcome = await Promise.race([
         inst.ready.then(() => 'ok' as const),
-        new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 8000)),
+        new Promise<'timeout'>((r) => setTimeout(() => r('timeout'), 15000)),
       ])
-      if (outcome === 'timeout') throw new Error('jassub worker ready timeout')
+      if (outcome === 'timeout') throw new Error('worker ready 超时(15s)')
     } catch (e) {
       await this.detach()
+      this.state = 'failed'
+      this.lastErr = String(e instanceof Error ? e.message : e).slice(0, 160)
       throw e instanceof Error ? e : new Error(String(e))
     }
+    this.state = 'ready'
     if (this.inst !== inst || mySeq !== this.seq) return
     await inst.resize(true)
 
@@ -135,6 +149,7 @@ export class JassubHost {
     }
     const inst = this.inst
     this.inst = null
+    if (this.state !== 'failed') this.state = 'idle'
     this.ro?.disconnect()
     this.ro = null
     if (inst) {

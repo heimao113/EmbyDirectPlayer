@@ -3,7 +3,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { loadPlaySession } from '../player/session'
 import { useApp } from '../state'
 import { buildDeviceProfile, detectAc3Support } from '../player/deviceProfile'
-import { fetchSubtitleText, toUnifiedAss, assToVtt, parseAssCues, cuesToSrt, sniffSubtitleFormat, type SubCue } from '../player/subtitles'
+import { fetchSubtitleText, toUnifiedAss, assToVtt, parseAssCues, cuesToSrt, sniffSubtitleFormat, setBilingualStripPref, getBilingualStripPref, type SubCue } from '../player/subtitles'
 import { loadFontManifest, registerFontFaces, toJassubFontConfig } from '../player/fonts'
 import { JassubHost } from '../player/jassubHost'
 import { Engine, type EngineStream, type PipelineKind } from '../player/engine'
@@ -293,6 +293,20 @@ export default function Player() {
   const audioStallRef = useRef(0)
   const hasAudioStreamRef = useRef(true)
   const lastSubRef = useRef<number | null>(null)
+  const lastSubInfoRef = useRef<{ events: number; fonts: number } | null>(null)
+  const [stripBi, setStripBi] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('ewp/prefs') ?? '{}').stripBilingual !== false } catch { return true }
+  })
+  const toggleStripBi = useCallback(() => {
+    setStripBi((v) => {
+      const nv = !v
+      setBilingualStripPref(nv)
+      try { localStorage.setItem('ewp/prefs', JSON.stringify({ stripBilingual: nv })) } catch { /* ignore */ }
+      // 立即按新偏好重挂当前字幕
+      void applySubtitleRef.current?.(activeSubRef.current)
+      return nv
+    })
+  }, [])
   const audioReloadRef = useRef({ count: 0, lastAt: 0 })
 
   const lastNativeSubIdRef = useRef<number | null>(null)
@@ -319,6 +333,7 @@ export default function Player() {
 
 
   // ---------- 字幕轨切换(libmedia 原生渲染) ----------
+  const applySubtitleRef = useRef<((i: number | null) => Promise<void>) | null>(null)
   const applySubtitle = useCallback(
     async (subIndex: number | null) => {
       activeSubRef.current = subIndex
@@ -401,6 +416,7 @@ export default function Player() {
                 }
                 return
               }
+              lastSubInfoRef.current = { events: cues.length, fonts: engine.embeddedFonts().length }
               console.info(
                 `[subtitle] track=${t.index} codec=${t.codec} bytes=${raw.length} ` +
                 `detect=${detected} events=${cues.length} renderer=JASSUB ` +
@@ -773,7 +789,7 @@ export default function Player() {
     return () => {
       cancelled = true
     }
-  }, [api, itemId, navigate, profile, sessionId, switchToRemux])
+  }, [api, itemId, navigate, profile, sessionId, switchToRemux, applySubtitleRef])
 
   /** 启动看门狗:load 挂起(如 MSE 打不开且不抛错)时按链降级 */
   const handleStartupFailure = useCallback(() => {
@@ -1436,7 +1452,17 @@ export default function Player() {
                   </div>
                 </>
               ) : (
-                <div className="diag-line dim">{pipeline === 'mse' ? '浏览器原生解码(MSE)' : '—'}</div>
+                <>
+                  <div className="diag-line dim">{pipeline === 'mse' ? '浏览器原生解码(MSE)' : '—'}</div>
+                  <div className="diag-line">
+                    字幕渲染器:
+                    {getJassub().getStatus().state === 'ready'
+                      ? `JASSUB(事件 ${lastSubInfoRef.current?.events ?? '—'},内嵌字体 ${lastSubInfoRef.current?.fonts ?? 0})`
+                      : getJassub().getStatus().state === 'failed'
+                        ? `失败:${getJassub().getStatus().lastErr}`
+                        : getJassub().getStatus().state}
+                  </div>
+                </>
               )}
               <div className="diag-line dim">多线程 {globalThis.crossOriginIsolated ? '已启用' : '未启用'}</div>
             </div>

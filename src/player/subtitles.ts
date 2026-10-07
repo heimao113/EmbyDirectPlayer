@@ -215,9 +215,20 @@ export function stripJapaneseEvents(ass: string): string {
   return out.join('\n')
 }
 
+/** 双语剥离偏好(持久化在 localStorage,由播放器菜单切换) */
+let stripBilingualEnabled = true
+
+export function setBilingualStripPref(on: boolean): void {
+  stripBilingualEnabled = on
+}
+
+export function getBilingualStripPref(): boolean {
+  return stripBilingualEnabled
+}
+
 export function toUnifiedAss(raw: string, resX: number, resY: number): string {
   const fmt = sniffSubtitleFormat(raw)
-  if (fmt === 'ass') return normalizeAss(stripJapaneseEvents(raw))
+  if (fmt === 'ass') return normalizeAss(stripBilingualEnabled ? stripJapaneseEvents(raw) : raw)
   if (fmt === 'ttml') {
     const text = raw
       .replace(/<br\s*\/?>/gi, '\n')
