@@ -162,6 +162,29 @@ export default function PlayerLite() {
     return true
   }, [api, itemId, profile])
 
+  // ---------- MSE 管线 video 元素铺满(内联样式,优先级最高) ----------
+  useEffect(() => {
+    if (status !== 'ready') return
+    let n = 0
+    const t = setInterval(() => {
+      n += 1
+      const v = surfaceRef.current?.querySelector('video')
+      if (v) {
+        const need = v.style.position !== 'absolute' || v.style.width !== '100%' || v.style.objectFit !== 'contain'
+        if (need) {
+          v.style.position = 'absolute'
+          v.style.inset = '0'
+          v.style.width = '100%'
+          v.style.height = '100%'
+          v.style.objectFit = 'contain'
+          v.style.background = '#000'
+        }
+      }
+      if (n >= 15) window.clearInterval(t)
+    }, 1000)
+    return () => window.clearInterval(t)
+  }, [status])
+
   // ---------- 字幕准备:Emby 文本字幕 → 官方 externalSubtitles ----------
   const prepareExternalSubs = useCallback(async (): Promise<Array<{ source: File; lang?: string; title?: string }>> => {
     const ms = msRef.current
@@ -694,6 +717,8 @@ export default function PlayerLite() {
       const emby = ms?.MediaStreams ?? []
       const vEm = emby.find((x) => x.Type === 'Video')
       const aEm = emby.find((x) => x.Type === 'Audio' && x.IsDefault) ?? emby.find((x) => x.Type === 'Audio')
+      // 片源码率(元数据声明值):缓冲满时 IO 停止、吞吐增量趋近 0,不能当码率显示
+      const srcMbps = ((vEm?.BitRate ?? 0) + (aEm?.BitRate ?? 0)) / 1_000_000
       // MSE 管线解码由浏览器完成,libmedia 的解码帧率恒为 0 —— 这是正常现象;
       // 码率改用 IO 字节增量计算(两种管线都准确)
       const isMSE = !!surfaceRef.current?.querySelector('video')
@@ -722,7 +747,7 @@ export default function PlayerLite() {
         aCh: Number(aEm?.Channels ?? 0),
         aDec: Math.round(Number(st?.audioDecodeFramerate ?? 0)),
         aRen: Math.round(Number(st?.audioRenderFramerate ?? 0)),
-        mbps: mbpsTotal.toFixed(1),
+        mbps: srcMbps > 0 ? srcMbps.toFixed(1) : mbpsTotal.toFixed(1),
         vMbps: vMbps.toFixed(1),
         aMbps: (aMbps * 1000).toFixed(0),
         pipeline: isMSE ? 'MSE' : 'WASM',
@@ -874,8 +899,9 @@ export default function PlayerLite() {
               <div className="ui-diag-sec">源</div>
               <div className="ui-diag-v strong">{diag.container} 容器</div>
               <div className="ui-diag-v dim">视频 {diag.vCount} · 音频 {diag.aCount} · 字幕 {diag.sCount}</div>
-              <div className="ui-diag-sec">网络</div>
+              <div className="ui-diag-sec">码率(片源)</div>
               <div className="ui-diag-v strong">{diag.mbps} Mbps</div>
+              <div className="ui-diag-v dim">下折线为实时吞吐(缓冲满时趋近 0 属正常)</div>
               <svg className="ui-diag-spark" viewBox="0 0 120 24" preserveAspectRatio="none">
                 <polyline
                   fill="none"
