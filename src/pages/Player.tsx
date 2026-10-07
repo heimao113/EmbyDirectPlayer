@@ -11,6 +11,10 @@ import { NativeEngine } from '../player/native'
 import type { BaseItem, MediaSource, MediaStream } from '../api/types'
 import type { AudioTrackOption, SubTrack } from './playerTypes'
 
+/** 字幕文本缓存:开播前预取,applySubtitle 直接命中,省掉起播后串行的提取请求 */
+const subTextCache = new Map<string, string>()
+const subTextKey = (itemId: string, msId: string | undefined, index: number) => `${itemId}/${msId}/${index}`
+
 // 覆盖画布对齐用的全局单例观察器已随 JASSUB 方案移除;字幕统一走 libmedia 原生渲染
 
 /** MSE 失败记忆:某编码组合 MSE 打不开时记住,本浏览器后续不再尝试(省一次重建) */
@@ -263,6 +267,19 @@ export default function Player() {
     return () => clearInterval(timer)
   }, [status, openMenu])
 
+  /** 字幕文本:缓存命中直接返回,未命中请求并落缓存 */
+  const fetchSubTextCached = useCallback(
+    async (track: SubTrack): Promise<string> => {
+      const key = subTextKey(itemId!, mediaSourceRef.current?.Id, track.index)
+      const hit = subTextCache.get(key)
+      if (hit !== undefined) return hit
+      const text = await fetchSubtitleText(api, track, itemId!, mediaSourceRef.current!.Id)
+      subTextCache.set(key, text)
+      return text
+    },
+    [api, itemId],
+  )
+
   const jassubRef = useRef<JassubHost | null>(null)
   const getJassub = () => (jassubRef.current ??= new JassubHost())
   const pipelineRef = useRef<PipelineKind>('unknown')
@@ -310,7 +327,7 @@ export default function Player() {
             // 文本轨 → JASSUB(libass)接管:还原度高于 libmedia 内置渲染;
             // 字幕内容走 Emby 提取接口(demux 出的轨不带完整 Style)
             const vs = engine.streams().find((x) => x.mediaType === 'video')
-            const raw = await fetchSubtitleText(api, track, itemId!, mediaSourceRef.current!.Id)
+            const raw = await fetchSubTextCached(track)
             const unified = toUnifiedAss(raw, vs?.width || 1280, vs?.height || 720)
             setTrCues(parseAssCues(unified)) // 文稿面板数据
             if (!surfaceRef.current) return
@@ -348,7 +365,7 @@ export default function Player() {
             return
           }
           // 原生 mp4 引擎:ASS → VTT 挂 <video> 文本轨
-          const raw = await fetchSubtitleText(api, track, itemId!, mediaSourceRef.current!.Id)
+          const raw = await fetchSubTextCached(track)
           const unified = toUnifiedAss(raw, 1280, 720)
           setTrCues(parseAssCues(unified))
           const vtt = assToVtt(unified)
@@ -367,7 +384,7 @@ export default function Player() {
           return
         }
         const vs = engine.streams().find((x) => x.mediaType === 'video')
-        const raw = await fetchSubtitleText(api, track, itemId!, mediaSourceRef.current!.Id)
+        const raw = await fetchSubTextCached(track)
         const assText = toUnifiedAss(raw, vs?.width || 1280, vs?.height || 720)
         setTrCues(parseAssCues(assText)) // 文稿面板数据
         const file = new File([assText], `subtitle.${track.codec === 'ass' || track.codec === 'ssa' ? 'ass' : 'srt'}`, {
@@ -608,6 +625,27 @@ export default function Player() {
           subStreams.find((s) => s.Language?.toLowerCase().startsWith('zh'))
         setActiveSub(def?.Index ?? null)
         activeSubRef.current = def?.Index ?? null
+        // 起播前并行预取:字幕提取请求 / JASSUB 的 wasm 与字体,全部与视频缓冲重叠,
+        // 消除"起播后字幕晚 2 秒才出现"的串行等待
+        if (def) {
+          const defTrack = buildSubTrack(def, itemId, ms.Id)
+          if (!defTrack.isGraphic) {
+            void fetchSubtitleText(api, defTrack, itemId, ms.Id)
+              .then((text) => subTextCache.set(subTextKey(itemId, ms.Id, def.Index), text))
+              .catch(() => {})
+          }
+        }
+        {
+          const base = new URL(import.meta.env.BASE_URL, location.href).href
+          void fetch(new URL('jassub/jassub-worker.wasm', base).href, { priority: 'low' } as RequestInit).catch(() => {})
+          void fetch(new URL('jassub/jassub-worker-modern.wasm', base).href, { priority: 'low' } as RequestInit).catch(() => {})
+          void loadFontManifest()
+            .then((m) => toJassubFontConfig(m))
+            .then((cfg) => {
+              for (const url of cfg.fontUrls) void fetch(url, { priority: 'low' } as RequestInit).catch(() => {})
+            })
+            .catch(() => {})
+        }
       } catch (e) {
         if (cancelled) return
         setStatus('error')
