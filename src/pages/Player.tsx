@@ -393,10 +393,8 @@ export default function Player() {
                   assContent: unified,
                   availableFonts: cfg.availableFonts,
                   defaultFont: cfg.fallback || 'sans-serif',
-                  video:
-                    pipelineRef.current === 'mse'
-                      ? engine.attachPoint().video
-                      : undefined,
+                  // 不传 video:JASSUB 的 video 模式(rvfc 驱动)在 MSE 管线下
+                  // 渲染不出来(实测 0 像素);统一走 canvas 模式由 rAF 驱动,可靠
                   getSec: () => engine.currentSec(),
                   videoWidth: vs?.width,
                   videoHeight: vs?.height,

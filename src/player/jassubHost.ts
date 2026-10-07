@@ -110,6 +110,8 @@ export class JassubHost {
       throw e instanceof Error ? e : new Error(String(e))
     }
     this.state = 'ready'
+    ;(window as unknown as Record<string, unknown>).__jassubInst = inst
+    ;(window as unknown as Record<string, unknown>).__jassubDbg = { tick: 0, resizeErr: '', renderErr: '', attachSeq: mySeq, canvasW: canvas.width }
     if (this.inst !== inst || mySeq !== this.seq) return
     await inst.resize(true)
 
@@ -132,11 +134,16 @@ export class JassubHost {
           width: vw,
           height: vh,
           mediaTime: Math.max(0, o.getSec?.() ?? 0),
-        }).catch(() => {})
+        }).catch((err) => {
+          const d = (window as unknown as Record<string, Record<string, unknown>>).__jassubDbg
+          if (d && !d.renderErr) d.renderErr = String(err).slice(0, 140)
+        })
       } catch {
         /* 单帧渲染失败不中断循环 */
       }
       this.raf = requestAnimationFrame(tick)
+      const d = (window as unknown as Record<string, Record<string, unknown>>).__jassubDbg
+      if (d) d.tick = ((d.tick as number) ?? 0) + 1
     }
     tick()
   }
