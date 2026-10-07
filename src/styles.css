@@ -1469,16 +1469,19 @@ body[data-accent="cyan"]    { --accent: #06b6d4; --accent-2: #22d3ee; }
 
 /* MSE 管线的 <video>:绝对定位铺满渲染面并保持宽高比
    (缺这条,libmedia 创建的 video 会按默认样式脱离容器跑到页面下方)
-   canvas(wasm 管线)保持原有铺满方式,libmedia 自带宽高比黑边 */
-.ui-surface video {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
+   !important:覆盖 libmedia 可能写入的内联样式 */
+.ui-player-page video {
+  position: absolute !important;
+  inset: 0 !important;
+  width: 100% !important;
+  height: 100% !important;
+  object-fit: contain !important;
   background: #000;
+  z-index: 1;
 }
 .ui-surface canvas {
+  position: absolute;
+  inset: 0;
   width: 100%;
   height: 100%;
   display: block;
