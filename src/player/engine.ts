@@ -149,6 +149,10 @@ export class Engine {
     this.audioStreamIndexHint = opts.audioStreamIndexHint
   }
 
+  get isPaused(): boolean {
+    return this.enginePaused
+  }
+
   get isPreferMSE(): boolean {
     return this.preferMSE
   }
@@ -513,6 +517,8 @@ export class Engine {
     width: number
     height: number
     rxBytes: number
+    audioDecodeFps: number
+    audioRenderFps: number
   } | null {
     const p = this.player
     if (!p) return null
@@ -528,6 +534,10 @@ export class Engine {
         rxBytes: Number(s.bufferReceiveBytes ?? 0),
         width: Number(s.width ?? 0),
         height: Number(s.height ?? 0),
+        // 音频健康信号:seek 后渲染线程未恢复时 audioRenderFramerate 为 0,
+        // 而视频时间照常前进,旧的停滞检测抓不到这种"音频消失"
+        audioDecodeFps: Math.round(Number(s.audioDecodeFramerate ?? 0)),
+        audioRenderFps: Math.round(Number(s.audioRenderFramerate ?? 0)),
       }
     } catch {
       return null

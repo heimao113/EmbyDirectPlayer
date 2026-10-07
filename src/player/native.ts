@@ -162,6 +162,8 @@ export class NativeEngine {
   selectedVideoId(): number | null { return null }
   statsSnapshot(): {
     bufferedSec: number
+    audioDecodeFps: number
+    audioRenderFps: number
     videoBitrateKbps: number
     audioBitrateKbps: number
     videoDecodeFps: number
@@ -185,6 +187,8 @@ export class NativeEngine {
       width: Math.round(bsec * (brBps / 8)),
       height: 0,
       rxBytes: Math.round(bsec * (brBps / 8)),
+      audioDecodeFps: 0,
+      audioRenderFps: 0,
     }
   }
   private audioBitrateKbpsHint = 0

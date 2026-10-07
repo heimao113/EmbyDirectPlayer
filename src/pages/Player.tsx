@@ -290,6 +290,9 @@ export default function Player() {
   const pipelineRef = useRef<PipelineKind>('unknown')
   const audioFallbackUsedRef = useRef(false)
   const streamFallbackUsedRef = useRef(false)
+  const audioStallRef = useRef(0)
+  const hasAudioStreamRef = useRef(true)
+  const audioReloadRef = useRef({ count: 0, lastAt: 0 })
 
   const lastNativeSubIdRef = useRef<number | null>(null)
 
@@ -680,6 +683,7 @@ export default function Player() {
         // 音频兜底(P0-1):视频永远直连;音频本地解不了(TrueHD 等,无 wasm 解码器)
         // 时整条切 DirectStreamUrl/TranscodingUrl——服务器视频 -c copy 仅音频转 AAC,
         // 真正做到"视频不转码、音频最小处理"。有 remux 链就用,没有则原始直连+运行时兜底(P0-2)
+        hasAudioStreamRef.current = !!as
         const audioLocal = isAudioLocallyDecodable(as?.Codec, supportsAc3)
         const remuxUrl = (ms.DirectStreamUrl ?? ms.TranscodingUrl ?? '').trim()
         if (canDirect && !audioLocal && remuxUrl) {
@@ -1132,6 +1136,40 @@ export default function Player() {
           console.warn(`[player] 播放持续停滞,自动重载续播 @ ${target.toFixed(1)}s(第 ${rec.count + 1} 次)`)
           setSeekLoading(true)
           void reloadEngineAt(target).then(() => setSeekLoading(false))
+        }
+      }
+
+      // 音频停滞看门狗:seek 后 libmedia 渲染线程可能没有恢复——视频时间照常前进,
+      // 上面的停滞检测(基于视频时钟)永远抓不到"音频消失"。改用 libmedia 的
+      // audioRenderFramerate/audioDecodeFramerate 判定:播放中两者持续为 0:
+      //   4 秒 → play() 重新拉起渲染线程(pause/resume 同款机制);
+      //   再 4 秒仍 0 → 整机重载(音频必回)。重载与恢复都有次数/时间限速。
+      if (
+        hasAudioStreamRef.current && engineRef.current instanceof Engine &&
+        !userPausedRef.current && !seekVerifyRef.current && !inResumeGrace &&
+        status === 'ready' && !engineRef.current.isPaused
+      ) {
+        const st = engineRef.current.statsSnapshot()
+        const audioAlive = !st || st.audioRenderFps > 0 || st.audioDecodeFps > 0
+        if (audioAlive) {
+          audioStallRef.current = 0
+        } else {
+          audioStallRef.current += 1
+          const nowTs = Date.now()
+          const arec = audioReloadRef.current
+          if (audioStallRef.current === 4) {
+            console.warn('[player] 音频渲染停滞,play() 恢复渲染线程')
+            audioStallRef.current = 0
+            resumedAtRef.current = Date.now()
+            void engineRef.current.resume()
+          } else if (audioStallRef.current >= 8 && arec.count < 2 && nowTs - arec.lastAt > 60_000) {
+            audioReloadRef.current = { count: arec.count + 1, lastAt: nowTs }
+            audioStallRef.current = 0
+            const target = Math.max(sec - 1, 0)
+            console.warn(`[player] 音频恢复无效,整机重载 @ ${target.toFixed(1)}s`)
+            setSeekLoading(true)
+            void reloadEngineAt(target).then(() => setSeekLoading(false))
+          }
         }
       }
     }, 1000)
