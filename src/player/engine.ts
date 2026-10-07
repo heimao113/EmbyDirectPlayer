@@ -12,6 +12,7 @@
  * 避免双层渲染。
  */
 import AVPlayer, { Events } from '@libmedia/avplayer'
+import { mapUint8Array } from '@libmedia/cheap'
 import { AVCodecID, AVMediaType, AVChannelOrder, AVDisposition } from '@libmedia/avutil/enum'
 
 /** 各声道数的标准布局掩码(ffmpeg av_channel_layout_default 同款):FL=1 FR=2 FC=4 LFE=8 BL=10 BR=20 BC=100 SL=200 SR=400 */
@@ -317,19 +318,55 @@ export class Engine {
     await this.player?.play({ audio: true, video: true, subtitle: true })
   }
 
+  private enginePaused = false
+
   async pause(): Promise<void> {
     await this.player?.pause()
+    this.enginePaused = true
   }
 
   async togglePlay(): Promise<void> {
-    if (this.pausedByEvent) await this.resume()
+    // 不依赖 PAUSED/PLAYING 事件(canvas 管线不保证触发),以引擎自己的状态为准
+    if (this.enginePaused) await this.playResume()
     else await this.pause()
   }
 
   private pausedByEvent = true
 
   async resume(): Promise<void> {
-    await this.player?.resume()
+    await this.playResume()
+  }
+
+  /** 恢复播放:必须走 play(),libmedia 的 resume() 在 canvas 管线不会重启渲染线程 */
+  private async playResume(): Promise<void> {
+    await this.player?.play()
+    this.enginePaused = false
+  }
+
+  /**
+   * 收集 MKV 内嵌字体附件(demux 出来的 ATTACHMENT 流),拷贝出 cheap 堆交给
+   * JASSUB——某些字幕组的 ASS 引用内嵌字体(文件名乱码),不喂这些字体样式全丢。
+   */
+  embeddedFonts(): Uint8Array[] {
+    const p = this.player
+    if (!p) return []
+    const fonts: Uint8Array[] = []
+    let total = 0
+    try {
+      for (const g of p.getStreams() as Array<Record<string, unknown>>) {
+        const cp = g.codecparProxy as Record<string, unknown> | undefined
+        if (!cp || (Number(cp.codecType) !== 4)) continue // AVMEDIA_TYPE_ATTACHMENT
+        const size = Number(cp.extradataSize ?? 0)
+        if (size < 128 || total + size > 96 * 1024 * 1024) continue
+        try {
+          const view = mapUint8Array(cp.extradata as never, size)
+          const copy = new Uint8Array(view)
+          fonts.push(copy)
+          total += size
+        } catch { /* 单个附件读取失败忽略 */ }
+      }
+    } catch { /* getStreams 不可用 */ }
+    return fonts
   }
 
   async seek(sec: number): Promise<void> {

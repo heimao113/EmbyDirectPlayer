@@ -27,6 +27,8 @@ export interface JassubAttachOptions {
   /** 视频源分辨率(ASS PlayRes 缩放的基准),canvas 管线必传 */
   videoWidth?: number
   videoHeight?: number
+  /** MKV 内嵌字体(附件流原始字节),libass 按字体内部名匹配 Style 引用 */
+  fonts?: Uint8Array[]
 }
 
 export class JassubHost {
@@ -57,6 +59,7 @@ export class JassubHost {
         subContent: o.assContent,
         availableFonts: o.availableFonts,
         defaultFont: o.defaultFont,
+        fonts: o.fonts,
         // workerUrl 不传:JASSUB 默认 new Worker(new URL('./worker/worker.js', import.meta.url)),
         // 由 Vite 以 es 格式打包(vite.config worker.format)——官方 worker 入口带裸导入,
         // 不能像 wasm 一样静态拷贝了直接用(那样握手会挂起:入口根本没注册消息处理)

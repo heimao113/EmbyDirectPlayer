@@ -345,6 +345,7 @@ export default function Player() {
                 getSec: () => engine.currentSec(),
                 videoWidth: vs?.width,
                 videoHeight: vs?.height,
+                fonts: engine.embeddedFonts(),
               })
               setSubError('')
               return
