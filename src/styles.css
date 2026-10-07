@@ -1466,3 +1466,20 @@ body[data-accent="cyan"]    { --accent: #06b6d4; --accent-2: #22d3ee; }
 .ui-diag-v.strong { font-weight: 600; }
 .ui-diag-v.dim { color: #9aa2b4; font-size: 12.5px; }
 .ui-diag-spark { width: 100%; height: 24px; display: block; margin-top: 4px; }
+
+/* MSE 管线的 <video>:绝对定位铺满渲染面并保持宽高比
+   (缺这条,libmedia 创建的 video 会按默认样式脱离容器跑到页面下方)
+   canvas(wasm 管线)保持原有铺满方式,libmedia 自带宽高比黑边 */
+.ui-surface video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  background: #000;
+}
+.ui-surface canvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
