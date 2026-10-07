@@ -420,14 +420,19 @@ input {
 /* ---------- 首页 / 媒体库 ---------- */
 
 /* Hero 增强:更沉浸的电影感 */
-.hero { min-height: 480px; border-radius: 0 0 18px 18px; margin: -20px -24px 28px; }
-.hero-bg { transition: background-image 0.6s ease; transform: scale(1.02); }
+/* UHD 式全屏 Hero:占满首屏 82vh,无边框圆角,内容沉在底部 */
+.hero {
+  min-height: max(520px, 82vh);
+  border-radius: 0;
+  margin: -20px -24px 10px;
+}
+.hero-bg { transition: background-image 0.6s ease; }
 .hero-shade {
   background:
     linear-gradient(to top, var(--bg) 3%, rgba(11,13,18,0.6) 38%, rgba(11,13,18,0.12) 68%),
     linear-gradient(to right, rgba(11,13,18,0.82) 0%, rgba(11,13,18,0.28) 50%, transparent 75%);
 }
-.hero-content { padding: 36px 42px; max-width: 700px; }
+.hero-content { padding: 0 48px 48px; max-width: 760px; }
 .hero-badge {
   background: rgba(255, 107, 157, 0.14);
   border: 1px solid rgba(255, 107, 157, 0.3);
@@ -438,7 +443,7 @@ input {
   letter-spacing: 0.08em;
 }
 .hero-title {
-  font-size: clamp(2rem, 5vw, 3.4rem);
+  font-size: clamp(2.4rem, 5.6vw, 4.2rem);
   font-weight: 800;
   letter-spacing: -0.02em;
   line-height: 1.1;
@@ -472,7 +477,7 @@ input {
   position: absolute;
   right: 0;
   bottom: 0;
-  width: 42%;
+  width: 38%;
   max-width: 520px;
   opacity: 0.16;
   pointer-events: none;
@@ -500,7 +505,7 @@ input {
 /* Section 标题增强 */
 .home-page section { margin-bottom: 38px; }
 .home-page h2 {
-  font-size: 17px;
+  font-size: 19px;
   font-weight: 700;
   color: #f0f2f5;
   margin: 0 0 14px;
@@ -563,7 +568,7 @@ input {
 /* Poster 行横向滚动 */
 .poster-row {
   display: flex;
-  gap: 14px;
+  gap: 16px;
   overflow-x: auto;
   padding-bottom: 12px;
   scrollbar-width: thin;
