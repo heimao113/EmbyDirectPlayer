@@ -154,8 +154,25 @@ export class Engine {
     return this.wasmOnly
   }
 
+  private consoleTap: ((...args: unknown[]) => void) | null = null
+  private consoleOrig: ((...args: unknown[]) => void) | null = null
+
   async create(handlers: EngineHandlers): Promise<void> {
     this.handlers = handlers
+    // libmedia 的音频解码失败(cannot open audio ... decoder)只走 logger.fatal 打日志,
+    // 不发 ERROR 事件、load() 也不 reject——上层无从感知。这里做一个窄拦截:
+    // 只匹配音频解码失败消息,转发为类型化 onError,其余原样透传。
+    const origError = console.error.bind(console)
+    const tap = (...args: unknown[]) => {
+      const msg = args.map((a) => (typeof a === 'string' ? a : String((a as Error)?.message ?? a))).join(' ')
+      if (/cannot open audio|open audio decoder|audio decoder failed/i.test(msg)) {
+        this.handlers.onError?.(new Error('audio-decoder-failed: ' + msg.slice(0, 140)))
+      }
+      origError(...args)
+    }
+    console.error = tap as typeof console.error
+    this.consoleTap = tap as unknown as (...args: unknown[]) => void
+    this.consoleOrig = origError
     await this.build()
   }
 
@@ -574,6 +591,13 @@ export class Engine {
   }
 
   async destroy(): Promise<void> {
+    if (this.consoleTap) {
+      // 仅当未被后续实例覆盖时恢复,避免误拆别人的拦截
+      const cur = console.error as unknown as (...args: unknown[]) => void
+      if (cur === this.consoleTap && this.consoleOrig) console.error = this.consoleOrig
+    }
+    this.consoleTap = null
+    this.consoleOrig = null
     const p = this.player
     this.player = null
     if (p) {

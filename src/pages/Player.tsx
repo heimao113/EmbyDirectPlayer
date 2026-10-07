@@ -286,10 +286,30 @@ export default function Player() {
   const jassubRef = useRef<JassubHost | null>(null)
   const getJassub = () => (jassubRef.current ??= new JassubHost())
   const pipelineRef = useRef<PipelineKind>('unknown')
+  const audioFallbackUsedRef = useRef(false)
+
   const lastNativeSubIdRef = useRef<number | null>(null)
 
   const supportsAc3 = useMemo(detectAc3Support, [])
   const profile = useMemo(() => buildDeviceProfile(supportsAc3), [supportsAc3])
+  /** 整条切 remux(视频 -c copy 仅音频转 AAC);无可用 remux 链返回 false */
+  const switchToRemux = useCallback(async (): Promise<boolean> => {
+    let remux = (mediaSourceRef.current?.DirectStreamUrl ?? mediaSourceRef.current?.TranscodingUrl ?? '').trim()
+    if (!remux) {
+      const tr = await api.playbackInfo(itemId!, profile, 0, true).catch(() => null)
+      const ms2 = tr?.MediaSources?.[0]
+      if (ms2) {
+        mediaSourceRef.current = ms2
+        remux = (ms2.DirectStreamUrl ?? ms2.TranscodingUrl ?? '').trim()
+      }
+    }
+    if (!remux) return false
+    const url = remux.startsWith('http') ? new URL(remux).pathname + new URL(remux).search : remux
+    const ext = (url.match(/\.(mkv|ts|m3u8|mp4)(?:$|\?)/i)?.[1] ?? 'mkv').toLowerCase()
+    setSrc({ url, kind: 'direct-stream', ext, audioTranscoded: true })
+    return true
+  }, [api, itemId, profile])
+
 
   // ---------- 字幕轨切换(libmedia 原生渲染) ----------
   const applySubtitle = useCallback(
@@ -418,6 +438,19 @@ export default function Player() {
       if (!s) return
       // 生命周期竞态(load/play 交叠)不是解码失败,libmedia 自己会恢复,不降级
       if (/not loaded|status/i.test(err.message)) return
+      // 音频解码失败(TrueHD 等无法本地解码的编码)→ 切 remux:视频 -c copy 仅音频转 AAC
+      if (/audio-decoder-failed|cannot open audio|open audio decoder/i.test(err.message)) {
+        if (!audioFallbackUsedRef.current) {
+          audioFallbackUsedRef.current = true
+          void switchToRemux().then((ok) => {
+            if (!ok) {
+              setStatus('error')
+              setErrorMsg('音频编码本机无法解码,且服务器无法转码音频')
+            }
+          })
+        }
+        return
+      }
       // 原生 <video> 解不动(典型:HEVC-in-MP4 无系统解码)→ 同一 URL 换 libmedia
       // 引擎直连(uhd 同款:MSE 不行还有 wasm 软解),不转码、不降画质
       if (s.kind === 'direct-native' && !fallbackUsedRef.current) {
@@ -547,6 +580,7 @@ export default function Player() {
     resumeDoneRef.current = false
     fallbackUsedRef.current = false
     forceLibmediaRef.current = false
+    audioFallbackUsedRef.current = false
     setSrc(null)
 
     ;(async () => {
@@ -674,7 +708,7 @@ export default function Player() {
     return () => {
       cancelled = true
     }
-  }, [api, itemId, navigate, profile, sessionId])
+  }, [api, itemId, navigate, profile, sessionId, switchToRemux])
 
   /** 启动看门狗:load 挂起(如 MSE 打不开且不抛错)时按链降级 */
   const handleStartupFailure = useCallback(() => {
