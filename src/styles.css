@@ -146,8 +146,9 @@ input {
 .login-hero { user-select: none; }
 .login-brand { display: flex; justify-content: center; }
 .login-brand-img {
-  width: clamp(300px, 46vw, 520px);
-  filter: drop-shadow(0 6px 30px rgba(0, 0, 0, 0.5));
+  width: min(86%, 560px);
+  height: auto;
+  filter: drop-shadow(0 8px 40px rgba(0, 0, 0, 0.55));
 }
 .login-access {
   color: #fff;
