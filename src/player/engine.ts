@@ -136,14 +136,17 @@ export class Engine {
   /** Emby 元数据里的主音轨声道数;libmedia demuxer 对某些 AAC 轨会填出无效声道(-1) */
   private audioChannelsHint = 0
 
+  private audioStreamIndexHint?: number
+
   constructor(
     container: HTMLElement,
-    opts: { preferMSE?: boolean; noWorker?: boolean; audioChannelsHint?: number } = {},
+    opts: { preferMSE?: boolean; noWorker?: boolean; audioChannelsHint?: number; audioStreamIndexHint?: number } = {},
   ) {
     this.container = container as HTMLDivElement
     this.preferMSE = opts.preferMSE ?? false
     this.noWorker = opts.noWorker ?? false
     this.audioChannelsHint = opts.audioChannelsHint ?? 0
+    this.audioStreamIndexHint = opts.audioStreamIndexHint
   }
 
   get isPreferMSE(): boolean {
@@ -247,12 +250,17 @@ export class Engine {
             }
           }
         }
+        // Emby 元数据优选的音轨(默认轨本地解不了时,选可解的备用音轨,如 TrueHD→AC3)
+        if (this.audioStreamIndexHint !== undefined) {
+          const hinted = pool.find((s) => s.index === this.audioStreamIndexHint)
+          if (hinted) return hinted as typeof streams[number]
+        }
         // 沿用 libmedia 默认选流规则:default 标记优先,否则第一个
         const byDefault = pool.filter((s) => s.disposition & AVDisposition.DEFAULT)
         return (byDefault[0] ?? pool[0]) as typeof streams[number]
       },
     })
-    AVPlayer.setLogLevel?.(import.meta.env.DEV ? 3 : 1)
+    AVPlayer.setLogLevel?.(3) // TODO 调试完改回
 
     player.on(Events.LOADING, () => h.onLoading?.('加载中'))
     player.on(Events.LOADED, () => {
@@ -316,11 +324,13 @@ export class Engine {
 
   async load(
     url: string,
-    opts: { ext?: string; isLive?: boolean; preloadBytes?: number } = {},
+    opts: { ext?: string; isLive?: boolean; preloadBytes?: number; maxProbeDuration?: number } = {},
   ): Promise<void> {
     if (!this.player) throw new Error('engine not created')
     await this.player.load(url, {
       ...(opts.ext ? { ext: opts.ext } : {}),
+      // 大文件(原盘/REMUX)流多、探测慢:默认 3 秒探测预算会 open stream failed(-2)
+      ...(opts.maxProbeDuration ? { maxProbeDuration: opts.maxProbeDuration } : {}),
       ioLoaderOptions: {
         // uhd 同款:按码率预载首段(约 20 秒的量),慢网/抖动多重试,读超时 20s
         ...(opts.preloadBytes ? { preload: opts.preloadBytes } : {}),

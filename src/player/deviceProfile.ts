@@ -91,3 +91,33 @@ export function isAudioLocallyDecodable(codec: string | undefined, supportsAc3: 
   }
   return false
 }
+
+/**
+ * 音轨优选:默认音轨本地解不了(如 TrueHD)时,在同一条 MediaSource 里找
+ * 一条本地可解的音轨(AC3/FLAC 等),返回其容器内流索引;默认轨可解返回 undefined。
+ * 排序规则:可解的轨里取声道数最多的(保 5.1 优于 2.0)。
+ */
+export interface AudioStreamLike {
+  index?: number
+  codec?: string
+  channels?: number
+  isDefault?: boolean
+}
+
+export function pickPreferredAudioIndex(
+  streams: AudioStreamLike[],
+  supportsAc3: boolean,
+): number | undefined {
+  const decodable = streams.filter((a) => {
+    if (a.index === undefined) return false
+    const c = (a.codec ?? '').toLowerCase().trim()
+    if (!c) return false
+    // ac3/eac3 恒可解(wasm 有解码器);其余查矩阵
+    if (LOCAL_AUDIO_CODECS.has(c)) return true
+    return supportsAc3 && false
+  })
+  if (decodable.length === 0) return undefined
+  const def = streams.find((a) => a.isDefault)
+  if (def && def.index !== undefined && decodable.some((a) => a.index === def.index)) return def.index
+  return decodable.sort((a, b) => (b.channels ?? 0) - (a.channels ?? 0))[0].index
+}

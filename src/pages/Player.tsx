@@ -7,7 +7,7 @@ import { fetchSubtitleText, toUnifiedAss, assToVtt, parseAssCues, cuesToSrt, typ
 import { loadFontManifest, registerFontFaces, toJassubFontConfig } from '../player/fonts'
 import { JassubHost } from '../player/jassubHost'
 import { Engine, type EngineStream, type PipelineKind } from '../player/engine'
-import { isAudioLocallyDecodable } from '../player/deviceProfile'
+import { isAudioLocallyDecodable, pickPreferredAudioIndex } from '../player/deviceProfile'
 import { NativeEngine } from '../player/native'
 import type { BaseItem, MediaSource, MediaStream } from '../api/types'
 import type { AudioTrackOption, SubTrack } from './playerTypes'
@@ -287,6 +287,7 @@ export default function Player() {
   const getJassub = () => (jassubRef.current ??= new JassubHost())
   const pipelineRef = useRef<PipelineKind>('unknown')
   const audioFallbackUsedRef = useRef(false)
+  const streamFallbackUsedRef = useRef(false)
 
   const lastNativeSubIdRef = useRef<number | null>(null)
 
@@ -439,6 +440,18 @@ export default function Player() {
       // 生命周期竞态(load/play 交叠)不是解码失败,libmedia 自己会恢复,不降级
       if (/not loaded|status/i.test(err.message)) return
       // 音频解码失败(TrueHD 等无法本地解码的编码)→ 切 remux:视频 -c copy 仅音频转 AAC
+      // 容器打不开(open stream failed):有 remux/转码链就降级(服务器最小参与),
+      // 没有(Emby 也解析不了的孤例)→ 明确报错,不黑屏
+      if (/open stream failed/i.test(err.message) && !streamFallbackUsedRef.current) {
+        streamFallbackUsedRef.current = true
+        void switchToRemux().then((ok) => {
+          if (!ok) {
+            setStatus('error')
+            setErrorMsg('该文件的容器结构浏览器无法解析(DirectPlay 失败),且服务器未提供转码链路')
+          }
+        })
+        return
+      }
       if (/audio-decoder-failed|cannot open audio|open audio decoder/i.test(err.message)) {
         if (!audioFallbackUsedRef.current) {
           audioFallbackUsedRef.current = true
@@ -581,6 +594,7 @@ export default function Player() {
     fallbackUsedRef.current = false
     forceLibmediaRef.current = false
     audioFallbackUsedRef.current = false
+    streamFallbackUsedRef.current = false
     setSrc(null)
 
     ;(async () => {
@@ -766,6 +780,13 @@ export default function Player() {
           // open 失败(-28)卡死起播,带上 Emby 元数据里的真实声道数供引擎修复
           audioChannelsHint:
             mediaSourceRef.current?.MediaStreams?.find((x) => x.Type === 'Audio')?.Channels ?? 0,
+          // 默认音轨本地解不了(TrueHD 等)→ 选同文件里可解的备用音轨(AC3 等)
+          audioStreamIndexHint: pickPreferredAudioIndex(
+            (mediaSourceRef.current?.MediaStreams ?? [])
+              .filter((x) => x.Type === 'Audio')
+              .map((x) => ({ index: x.Index, codec: x.Codec, channels: x.Channels, isDefault: x.IsDefault })),
+            supportsAc3,
+          ),
         })
     ;(window as any).__ewp_engine = engine // 诊断钩子(不暴露敏感数据)
     engineRef.current = engine
@@ -781,7 +802,8 @@ export default function Player() {
           const v0 = ms0?.MediaStreams?.find((x) => x.Type === 'Video')
           const br = v0?.BitRate ?? 0
           const preload = Math.min(64 * 1024 * 1024, Math.max(8 * 1024 * 1024, Math.round((br / 8) * 20)))
-          await engine.load(src.url, { ext: src.ext, preloadBytes: preload })
+          // 大文件(原盘/REMUX,流多)demuxer 探测慢,默认 3 秒预算会 open stream failed(-2),放宽到 15 秒
+        await engine.load(src.url, { ext: src.ext, preloadBytes: preload, maxProbeDuration: 15 })
         }
         // play() 只在 onLoaded 回调里调,这里重复调会撞状态机(fatal: status not loaded)
       } catch (e) {
