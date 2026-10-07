@@ -110,6 +110,33 @@ export default function PlayerLite() {
   const [openMenu, setOpenMenu] = useState<'audio' | 'speed' | null>(null)
   const [audioTracks, setAudioTracks] = useState<Array<{ id: number; label: string }>>([])
   const [selectedAudioId, setSelectedAudioId] = useState(-1)
+  // 播放链路统计(打开后长久保活,seek/拖动不影响)
+  const [diagOpen, setDiagOpen] = useState(false)
+  const [moreOpen, setMoreOpen] = useState(false)
+  const [diag, setDiag] = useState<{
+    container: string
+    vCount: number
+    aCount: number
+    sCount: number
+    vCodec: string
+    width: number
+    height: number
+    fps: number
+    aCodec: string
+    aCh: number
+    aDec: number
+    aRen: number
+    mbps: string
+    vMbps: string
+    aMbps: string
+    pipeline: 'MSE' | 'WASM'
+    dropped: number
+  } | null>(null)
+  // 进度条拖动状态:拖动中显示预览位置,提交后锁定直到播放追上(不回跳)
+  const [seekDragging, setSeekDragging] = useState(false)
+  const [seekPreview, setSeekPreview] = useState(0)
+  const seekLockRef = useRef<{ target: number; until: number } | null>(null)
+  const bitrateHistRef = useRef<number[]>([])
   const hideTimerRef = useRef<number | null>(null)
   const shellRef = useRef<HTMLDivElement | null>(null)
 
@@ -231,7 +258,17 @@ export default function PlayerLite() {
     player.on(Events.TIME, () => {
       if (pausedRef.current) pausedRef.current = false
       try {
-        setCur(Number(player.currentTime ?? 0) / 1000)
+        const nowSec = Number(player.currentTime ?? 0) / 1000
+        const lock = seekLockRef.current
+        if (lock) {
+          if (Math.abs(nowSec - lock.target) <= 2.5 || Date.now() > lock.until) seekLockRef.current = null
+          else {
+            // seek 追上之前,进度条与时间显示保持在目标位置(不回跳)
+            setCur(lock.target)
+            return
+          }
+        }
+        setCur(nowSec)
         const d = player.getDuration()
         setDur(d > 0n ? Number(d) / 1000 : 0)
       } catch { /* ignore */ }
@@ -474,34 +511,6 @@ export default function PlayerLite() {
     return () => clearInterval(timer)
   }, [status, src])
 
-  // ---------- 键盘 ----------
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const tag = (e.target as HTMLElement)?.tagName
-      if (tag === 'INPUT' || tag === 'TEXTAREA') return
-      const player = playerRef.current
-      if (!player) return
-      switch (e.key) {
-        case ' ':
-        case 'k':
-          e.preventDefault()
-          pausedRef.current ? void player.play().catch(() => {}) : player.pause()
-          pausedRef.current = !pausedRef.current
-          break
-        case 'ArrowLeft':
-          void player.seek(BigInt(Math.max(0, Number(player.currentTime ?? 0) / 1000 - (e.shiftKey ? 60 : 10)) * 1000 | 0)).catch(() => {})
-          break
-        case 'ArrowRight':
-          void player.seek(BigInt(Math.round(Number(player.currentTime ?? 0) / 1000 + (e.shiftKey ? 60 : 10)) * 1000)).catch(() => {})
-          break
-        case 'Escape':
-          if (!document.fullscreenElement) navigate(-1)
-          break
-      }
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [navigate])
 
   // ---------- 控制处理 ----------
   const togglePlay = useCallback(() => {
@@ -518,13 +527,18 @@ export default function PlayerLite() {
     }
   }, [])
 
-  const seekTo = useCallback((sec: number) => {
+  const commitSeek = useCallback((targetSec: number) => {
     const player = playerRef.current
     if (!player) return
-    const target = Math.max(0, Math.min(sec, dur || sec))
-    void player.seek(BigInt(Math.round(target * 1000))).catch(() => {})
+    const target = Math.max(0, Math.min(targetSec, dur || targetSec))
+    seekLockRef.current = { target, until: Date.now() + 6000 }
     setCur(target)
+    void player.seek(BigInt(Math.round(target * 1000))).catch(() => {})
   }, [dur])
+
+  const seekTo = useCallback((sec: number) => {
+    commitSeek(sec)
+  }, [commitSeek])
 
   const changeVolume = useCallback((v: number) => {
     const player = playerRef.current
@@ -610,6 +624,78 @@ export default function PlayerLite() {
 
   const playedPct = dur > 0 ? Math.min(100, (cur / dur) * 100) : 0
 
+  // ---------- 播放链路统计(打开时持续采样,长久保活) ----------
+  useEffect(() => {
+    if (!diagOpen || status !== 'ready') return
+    const collect = () => {
+      const ui = playerRef.current
+      if (!ui) return
+      const ms = msRef.current
+      const st = ui.getStats?.()
+      const streams = ((ui.getStreams?.() ?? []) as unknown as Array<{ codecparProxy?: { codecType?: unknown; channels?: unknown } }>)
+      const vCount = streams.filter((x) => Number(x.codecparProxy?.codecType) === 0).length
+      const aCount = streams.filter((x) => Number(x.codecparProxy?.codecType) === 1).length
+      const emby = ms?.MediaStreams ?? []
+      const vEm = emby.find((x) => x.Type === 'Video')
+      const aEm = emby.find((x) => x.Type === 'Audio' && x.IsDefault) ?? emby.find((x) => x.Type === 'Audio')
+      const vMbps = Number(st?.videoBitrate ?? 0) / 1_000_000
+      const aMbps = Number(st?.audioBitrate ?? 0) / 1_000_000
+      const mbps = vMbps + aMbps
+      bitrateHistRef.current = [...bitrateHistRef.current.slice(-39), mbps]
+      setDiag({
+        container: (ms?.Container ?? 'MKV').toUpperCase(),
+        vCount,
+        aCount,
+        sCount: emby.filter((x) => x.Type === 'Subtitle').length,
+        vCodec: (vEm?.Codec ?? '—').toUpperCase(),
+        width: Number(st?.width ?? vEm?.Width ?? 0),
+        height: Number(st?.height ?? vEm?.Height ?? 0),
+        fps: Number(st?.videoRenderFramerate ?? 0),
+        aCodec: (aEm?.Codec ?? '—').toUpperCase(),
+        aCh: Number(aEm?.Channels ?? 0),
+        aDec: Math.round(Number(st?.audioDecodeFramerate ?? 0)),
+        aRen: Math.round(Number(st?.audioRenderFramerate ?? 0)),
+        mbps: mbps.toFixed(1),
+        vMbps: vMbps.toFixed(1),
+        aMbps: (aMbps * 1000).toFixed(0),
+        pipeline: (ui as unknown as { useMSE?: boolean }).useMSE ? 'MSE' : 'WASM',
+        dropped: Number(st?.videoFrameDropCount ?? 0),
+      })
+    }
+    collect()
+    const t = setInterval(collect, 1000)
+    return () => clearInterval(t)
+  }, [diagOpen, status])
+
+  // ---------- 键盘 ----------
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement)?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return
+      const player = playerRef.current
+      if (!player) return
+      switch (e.key) {
+        case ' ':
+        case 'k':
+          e.preventDefault()
+          pausedRef.current ? void player.play().catch(() => {}) : player.pause()
+          pausedRef.current = !pausedRef.current
+          break
+        case 'ArrowLeft':
+          commitSeek(Number(player.currentTime ?? 0) / 1000 - (e.shiftKey ? 60 : 10))
+          break
+        case 'ArrowRight':
+          commitSeek(Number(player.currentTime ?? 0) / 1000 + (e.shiftKey ? 60 : 10))
+          break
+        case 'Escape':
+          if (!document.fullscreenElement) navigate(-1)
+          break
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [navigate, commitSeek])
+
   // ---------- 渲染 ----------
   return (
     <div
@@ -641,8 +727,11 @@ export default function PlayerLite() {
               type="range"
               min={0}
               max={1000}
-              value={dur > 0 ? Math.min(1000, Math.round((cur / dur) * 1000)) : 0}
-              onChange={(e) => seekTo((Number(e.target.value) / 1000) * dur)}
+              value={seekDragging ? seekPreview : dur > 0 ? Math.min(1000, Math.round((cur / dur) * 1000)) : 0}
+              onPointerDown={(e) => { setSeekDragging(true); setSeekPreview(Number((e.target as HTMLInputElement).value)) }}
+              onInput={(e) => { setSeekDragging(true); setSeekPreview(Number((e.target as HTMLInputElement).value)) }}
+              onPointerUp={(e) => { setSeekDragging(false); commitSeek((Number((e.target as HTMLInputElement).value) / 1000) * dur) }}
+              onKeyUp={() => { setSeekDragging(false); commitSeek((seekPreview / 1000) * dur) }}
               className="ui-progress"
               aria-label="进度"
             />
@@ -688,8 +777,59 @@ export default function PlayerLite() {
               className="ui-volume"
               aria-label="音量"
             />
+            <div className="ui-menu-box">
+              <button
+                onClick={(e) => { e.stopPropagation(); setMoreOpen(moreOpen ? false : !moreOpen) }}
+                title="更多"
+              >⋮</button>
+              {moreOpen && (
+                <div className="ui-menu" onClick={(e) => e.stopPropagation()}>
+                  <button className="ui-menu-item" onClick={() => { setDiagOpen((v) => !v); setMoreOpen(false) }}>
+                    {diagOpen ? '隐藏统计' : '显示统计'}
+                  </button>
+                </div>
+              )}
+            </div>
             <button onClick={toggleFullscreen} title="全屏">⛶</button>
           </div>
+        </div>
+      )}
+      {diagOpen && (
+        <div className="ui-diag" onClick={(e) => e.stopPropagation()}>
+          <div className="ui-diag-head">
+            <span>⚡ 播放链路</span>
+            <button onClick={() => setDiagOpen(false)}>✕</button>
+          </div>
+          <div className="ui-diag-ok">✓ 链路正常</div>
+          {diag && (
+            <>
+              <div className="ui-diag-sec">源</div>
+              <div className="ui-diag-v strong">{diag.container} 容器</div>
+              <div className="ui-diag-v dim">视频 {diag.vCount} · 音频 {diag.aCount} · 字幕 {diag.sCount}</div>
+              <div className="ui-diag-sec">网络</div>
+              <div className="ui-diag-v strong">{diag.mbps} Mbps</div>
+              <svg className="ui-diag-spark" viewBox="0 0 120 24" preserveAspectRatio="none">
+                <polyline
+                  fill="none"
+                  stroke="#ff6b9d"
+                  strokeWidth="1.5"
+                  points={(() => {
+                    const h = bitrateHistRef.current.slice(-40)
+                    if (h.length < 2) return '0,24 120,24'
+                    const max = Math.max(...h, 0.1)
+                    return h.map((v, i) => `${(i / (h.length - 1)) * 120},${24 - (v / max) * 22}`).join(' ')
+                  })()}
+                />
+              </svg>
+              <div className="ui-diag-sec">解码</div>
+              <div className="ui-diag-v strong">{diag.vCodec} · {diag.width}×{diag.height} · {diag.fps.toFixed(2)}fps</div>
+              <div className="ui-diag-v dim">音频 {diag.aCodec}{diag.aCh ? ` ${diag.aCh}ch` : ''} · 解码 {diag.aDec} fps · 渲染 {diag.aRen} fps</div>
+              <div className="ui-diag-sec">渲染</div>
+              <div className="ui-diag-v">{diag.pipeline === 'MSE' ? '播放器 MSE 画面' : '播放器自渲染画面'}</div>
+              <div className="ui-diag-sec">显示</div>
+              <div className="ui-diag-v">SDR 呈现</div>
+            </>
+          )}
         </div>
       )}
       {status === 'loading' && <div className="ui-loading">{stage}</div>}

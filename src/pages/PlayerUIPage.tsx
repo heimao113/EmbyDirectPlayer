@@ -120,7 +120,6 @@ export default function PlayerUIPage() {
           return cp ? Number(cp.codecType) === mediaType : false
         })
         if (mediaType === 1) {
-          console.info('[ui-player] findBestStream audio: pool =', pool.length, 'proxies =', proxies.length)
           const hintCh = (msRef.current?.MediaStreams ?? []).find((x) => x.Type === 'Audio')?.Channels ?? 0
           for (const s of pool) {
             const cp = cpOf(s.id) as
@@ -134,8 +133,7 @@ export default function PlayerUIPage() {
               layout.order = 1 as unknown as typeof layout.order
               layout.u.mask = CHANNEL_DEFAULT_MASK[nb] ?? 0x3Fn
             } else if (nb <= 0 && hintCh > 0) {
-              console.info('[ui-player] 修补声道:轨', s.index, 'nb =', nb, '→', hintCh)
-              // demuxer 填出无效声道 → 用 Emby 元数据的真实声道数修复
+                  // demuxer 填出无效声道 → 用 Emby 元数据的真实声道数修复
               layout.nbChannels = hintCh
               layout.order = 1 as unknown as typeof layout.order
               layout.u.mask = CHANNEL_DEFAULT_MASK[hintCh] ?? 0x3Fn
