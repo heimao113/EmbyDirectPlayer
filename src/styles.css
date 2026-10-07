@@ -45,8 +45,28 @@ input {
   border-bottom: 1px solid #23272e;
   position: sticky; top: 0; z-index: 50;
 }
-.logo { display: flex; align-items: center; gap: 8px; font-size: 16px; font-weight: 800; color: var(--text); cursor: pointer; user-select: none; white-space: nowrap; }
-.logo-dot { width: 22px; height: 22px; border-radius: 7px; background: linear-gradient(135deg, var(--accent-2), var(--accent)); display: inline-block; }
+.logo { display: flex; align-items: center; gap: 10px; cursor: pointer; user-select: none; white-space: nowrap; height: 44px; }
+.logo-cat {
+  height: 40px;
+  filter: drop-shadow(0 0 6px rgba(255, 107, 157, 0.25));
+  transition: transform 0.2s ease;
+}
+.logo:hover .logo-cat { transform: rotate(-6deg) scale(1.06); }
+.logo-text {
+  font-size: 21px;
+  font-weight: 800;
+  color: var(--text);
+  letter-spacing: -0.02em;
+  font-family: 'Segoe UI', 'Microsoft YaHei', system-ui, sans-serif;
+}
+.logo-text i {
+  font-style: normal;
+  color: var(--accent);
+  font-weight: 600;
+  margin: 0 2px;
+  font-size: 0.82em;
+}
+.logo-dot { display: none; }
 .nav-pills { display: flex; align-items: center; gap: 4px; overflow-x: auto; scrollbar-width: none; }
 .nav-pill {
   padding: 7px 16px; border-radius: 999px;
@@ -124,6 +144,11 @@ input {
   .login-layout { grid-template-columns: 1.15fr 1fr; }
 }
 .login-hero { user-select: none; }
+.login-brand { display: flex; justify-content: center; }
+.login-brand-img {
+  width: clamp(300px, 46vw, 520px);
+  filter: drop-shadow(0 6px 30px rgba(0, 0, 0, 0.5));
+}
 .login-access {
   color: #fff;
   font-size: clamp(4rem, 11vw, 8.2rem);
@@ -443,6 +468,18 @@ input {
 }
 .hero-cta:hover { transform: scale(1.03); box-shadow: 0 6px 24px rgba(255, 77, 148, 0.4); }
 .hero-cta:active { transform: scale(0.98); }
+.hero-tail {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 42%;
+  max-width: 520px;
+  opacity: 0.16;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  mask-image: linear-gradient(to left, black 55%, transparent 95%);
+  -webkit-mask-image: linear-gradient(to left, black 55%, transparent 95%);
+}
 .hero-arrows { right: 20px; bottom: 30px; }
 .hero-arrow {
   background: rgba(255, 255, 255, 0.1);

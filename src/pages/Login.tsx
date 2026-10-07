@@ -43,7 +43,9 @@ export default function Login() {
       <div className="login-shade" aria-hidden />
       <div className="login-layout">
         <div className="login-hero">
-          <img src="/stream/logo-heimao.png" alt="heimaoのemby" style={{ width: 'clamp(280px, 50vw, 480px)', borderRadius: '12px' }} />
+          <div className="login-brand">
+            <img src="/stream/brand-cat.png" alt="heimaoのemby" className="login-brand-img" />
+          </div>
         </div>
         <form className="login-card" onSubmit={submit}>
           <div className="lc-field">

@@ -118,6 +118,7 @@ export default function Home() {
               <button className="hero-cta" onClick={() => navigate(heroAction)}>▶ 立即观看</button>
             </div>
           </div>
+          <img src="/stream/brand-cat-tail.png" alt="" className="hero-tail" />
           {heroes.length > 1 && (
             <>
               <div className="hero-arrows">

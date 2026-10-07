@@ -35,7 +35,8 @@ export default function Header() {
   return (
     <header className="app-header" onClick={() => setSettingsOpen(false)}>
       <span className="logo" onClick={() => navigate('/')}>
-        <img src="/stream/logo-heimao.png" alt="heimaoのemby" style={{ height: '34px', borderRadius: '6px' }} />
+        <img src="/stream/brand-cat-icon.png" alt="" className="logo-cat" />
+        <span className="logo-text">heimao<i>の</i>emby</span>
       </span>
 
       <nav className="nav-pills">
