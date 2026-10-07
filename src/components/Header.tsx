@@ -27,7 +27,7 @@ export default function Header() {
   return (
     <header className="app-header">
       <span className="logo" onClick={() => navigate('/')}>
-        <img src="/stream/logo-wordmark.png" alt="heimao" className="logo-img" />
+        <img src="/stream/logo-wordmark.png" alt="动漫一生推" className="logo-img" />
       </span>
 
       <nav className="nav-pills">
