@@ -368,6 +368,9 @@ export default function Player() {
               const cues = parseAssCues(unified)
               setTrCues(cues) // 文稿面板数据
               if (!surfaceRef.current) return
+              // JASSUB 接管前必须关掉 libmedia 内置字幕渲染,
+              // 否则内置渲染同时画原始双语轨 → 双重字幕(实测)
+              await engine.setNativeSubtitleEnabled(false)
               const cfg = toJassubFontConfig(await loadFontManifest())
               try {
                 await getJassub().attach({
@@ -485,7 +488,11 @@ export default function Player() {
       // 音频解码失败(TrueHD 等无法本地解码的编码)→ 切 remux:视频 -c copy 仅音频转 AAC
       // 容器打不开(open stream failed):有 remux/转码链就降级(服务器最小参与),
       // 没有(Emby 也解析不了的孤例)→ 明确报错,不黑屏
-      if (/open stream failed/i.test(err.message) && !streamFallbackUsedRef.current) {
+      if (
+        /open stream failed/i.test(err.message) &&
+        !streamFallbackUsedRef.current &&
+        !startedRef.current
+      ) {
         streamFallbackUsedRef.current = true
         void switchToRemux().then((ok) => {
           if (!ok) {
