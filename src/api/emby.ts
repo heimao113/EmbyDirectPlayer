@@ -101,7 +101,9 @@ export class EmbyApi {
 
   // ---------- 登录 / 会话 ----------
 
-  async login(serverRaw: string, username: string, password: string): Promise<AuthInfo> {
+  async login(serverRaw: string, username: string, password: string, totp = ''): Promise<AuthInfo> {
+    // 2FA 插件惯例:动态验证码以冒号拼接在密码后
+    const pw = totp ? `${password}:${totp}` : password
     const server = normalizeServer(serverRaw)
     const deviceId = getOrCreateDeviceId()
     let res: Response
@@ -113,7 +115,7 @@ export class EmbyApi {
           // 登录请求还没有 token,只带客户端声明
           'X-Emby-Authorization': this.authHeader(undefined),
         },
-        body: JSON.stringify({ Username: username, Pw: password }),
+        body: JSON.stringify({ Username: username, Pw: pw }),
       })
     } catch {
       throw new Error('无法连接到服务器,请检查地址是否正确、服务是否在线')
