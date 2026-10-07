@@ -21,7 +21,7 @@ import { AVCodecID } from '@libmedia/avutil/enum'
 import { useApp } from '../state'
 import type { BaseItem, MediaSource, MediaStream } from '../api/types'
 import { buildDeviceProfile, isAudioLocallyDecodable, pickPreferredAudioIndex } from '../player/deviceProfile'
-import { fetchSubtitleText, setBilingualStripPref, getBilingualStripPref, toFixedFormatAss } from '../player/subtitles'
+import { fetchSubtitleText, setBilingualStripPref, getBilingualStripPref } from '../player/subtitles'
 import { registerFontFaces } from '../player/fonts'
 
 const WASM_BASE = new URL(import.meta.env.BASE_URL, location.href).href
@@ -215,9 +215,13 @@ export default function PlayerLite() {
     if (!ms) return []
     const all = (ms.MediaStreams ?? []).filter((x) => x.Type === 'Subtitle')
     const text = all.filter((x) => !['pgs', 'pgssub', 'dvdsub', 'sup', 'dvbsub'].includes((x.Codec ?? '').toLowerCase()))
-    if (text.length === 0) return []
+    // 内嵌文本轨存在 → libmedia 内置渲染器直接画(样式/位置/内嵌字体为字幕组原设计),
+    // 不再叠加外挂固定格式(双字幕 + 外挂定位偏差就是这么来的)
+    if (text.length > 0) return []
+    const externalOnly = all.filter((x) => x.IsExternal)
+    if (externalOnly.length === 0) return []
     const strip = getBilingualStripPref()
-    const pick = text.find((s) => s.IsDefault) ?? text.find((s) => (s.Language ?? '').toLowerCase().startsWith('zh')) ?? text[0]
+    const pick = externalOnly.find((s) => s.IsDefault) ?? externalOnly.find((s) => (s.Language ?? '').toLowerCase().startsWith('zh')) ?? externalOnly[0]
     try {
       const raw = await fetchSubtitleText(
         api,
@@ -226,11 +230,9 @@ export default function PlayerLite() {
         ms.Id,
       )
       // 双语偏好:开启时剥离日文行(持久化设置,字幕菜单可切换)
-      // 固定格式:统一字体/底部居中,双语按行堆叠(不再跟随原字幕组排版)
-      const content = toFixedFormatAss(raw, 1920, 1080, { stripBilingual: strip })
-      const file = new File([content], 'subtitle.ass', { type: 'text/plain' })
+      const file = new File([raw], `subtitle.${pick.Codec === 'subrip' ? 'srt' : pick.Codec}`, { type: 'text/plain' })
       const out = [{ source: file, lang: pick.Language ?? pick.Codec ?? '', title: pick.DisplayTitle ?? pick.Title ?? '字幕' }]
-      console.info(`[subtitle] 外挂装载:轨 ${pick.Index} ${pick.Codec} ${Math.round(content.length / 1024)}KB`)
+      console.info(`[subtitle] 外挂装载:轨 ${pick.Index} ${pick.Codec} ${Math.round(raw.length / 1024)}KB`)
       return out
     } catch (e) {
       console.warn('[subtitle] 提取失败,无外挂字幕可装载', e)
