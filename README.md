@@ -13,9 +13,12 @@
   - WebAssembly 软解(无硬解时兜底;配合 COOP/COEP 多线程,4K HEVC 实时可跑)
 - **智能降级链**:mp4 → 原生 `<video>`;MSE 打不开 → canvas 管线;极端情况 → 纯 wasm 重建;每级失败自动下沉,启动看门狗 + 播放中停滞自愈
 - **字幕**:
-  - 文本字幕(ASS/SSA/SRT)统一走 [JASSUB](https://github.com/YouTube-Extension/JASSUB)(libass 的 wasm 版),特效字幕完整还原
-  - PGS/DVB 位图字幕由 libmedia 原生渲染(不再置灰)
+  - 文本字幕(ASS/SSA/SRT)由 [JASSUB](https://github.com/YouTube-Extension/JASSUB)(libass 的 wasm 版)渲染,
+    特效字幕完整还原;JASSUB 不可用时自动回退 libmedia 内置渲染,字幕始终可见
+  - PGS/DVB 位图字幕由 libmedia 原生渲染(libass 画不了位图)
   - 内嵌字幕走 Emby 提取接口,外挂字幕直接读文件;SRT 统一归一化为 ASS
+  - **字体必须给 JASSUB 喂 TTF/OTF**:其内嵌 freetype 解不了 woff2(静默零字形、字幕整条不显示);
+    `public/fonts/` 同时提供 woff2(浏览器 CSS 用)与 ttf(libass 用)两种格式
 - **字体兜底**:自托管思源黑体子集(woff2)+ 浏览器本机字体(Local Font Access),字幕不再豆腐块
 - **Emby 集成**:登录(38 位以上设备标识)、媒体库/详情/剧集列表、播放进度上报、断点续播、看完标记
 - **网络**:按内容码率自适应首段 Range 预载(8–64MB),减少碎片请求

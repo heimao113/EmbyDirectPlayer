@@ -34,21 +34,30 @@ export async function loadFontManifest(): Promise<FontManifest> {
   }
 }
 
-/** 转成 JASSUB 需要的 availableFonts 映射与默认字体名(同一文件多别名只加载一次) */
+/**
+ * 转成 JASSUB 需要的 availableFonts 映射与默认字体名(同一文件多别名只加载一次)。
+ * 注意:JASSUB 内嵌的 freetype 读不了 woff2(静默零字形→字幕整条不显示),
+ * 必须喂 TTF/OTF——manifest 里的 .woff2 一律换成同名的 .ttf(public/fonts 同时提供两种格式)。
+ */
 export function toJassubFontConfig(manifest: FontManifest) {
   const availableFonts: Record<string, string> = {}
   const loaded = new Set<string>()
   const fontUrls: string[] = []
   let fallback = manifest.fallback
+  let fallbackTtf = ''
   for (const f of manifest.fonts) {
     const url = resolveUrl(f.url)
-    availableFonts[f.family] = url
-    if (!loaded.has(url)) {
-      loaded.add(url)
-      fontUrls.push(url)
+    const ttfUrl = url.endsWith('.woff2') ? url.slice(0, -'.woff2'.length) + '.ttf' : url
+    availableFonts[f.family] = ttfUrl
+    if (!loaded.has(ttfUrl)) {
+      loaded.add(ttfUrl)
+      fontUrls.push(ttfUrl)
     }
     if (!fallback || f.default) fallback = f.family
+    if ((!fallbackTtf || f.default) && ttfUrl) fallbackTtf = ttfUrl
   }
+  // libass 的通用兜底名也要有落点,否则 Style 字体名全部 miss 时一条都画不出
+  if (fallbackTtf) availableFonts['sans-serif'] = fallbackTtf
   return { availableFonts, fontUrls, fallback }
 }
 

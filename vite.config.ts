@@ -12,7 +12,13 @@ export default defineConfig({
     // 且要与打包后的 avplayer js 同目录(默认 dist/assets/)。
     // dev 模式下配合 optimizeDeps.exclude 从源路径加载,无需拷贝。
     viteStaticCopy({
-      targets: [{ src: 'node_modules/@libmedia/avplayer/dist/esm/[0-9]*.avplayer.js', dest: 'assets' }],
+      targets: [
+        { src: 'node_modules/@libmedia/avplayer/dist/esm/[0-9]*.avplayer.js', dest: 'assets' },
+        // JASSUB(libass wasm)字幕渲染的 worker 与 wasm
+        { src: 'node_modules/jassub/dist/wasm/jassub-worker.wasm', dest: 'jassub' },
+        { src: 'node_modules/jassub/dist/wasm/jassub-worker-modern.wasm', dest: 'jassub' },
+        { src: 'node_modules/jassub/dist/default.woff2', dest: 'jassub' },
+      ],
     }),
   ],
   // jassub 内部用 new Worker(new URL(...)) 的 ESM worker,rollup 打包它需要 es 格式

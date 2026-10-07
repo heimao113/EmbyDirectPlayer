@@ -4,7 +4,8 @@ import { loadPlaySession } from '../player/session'
 import { useApp } from '../state'
 import { buildDeviceProfile, detectAc3Support } from '../player/deviceProfile'
 import { fetchSubtitleText, toUnifiedAss, assToVtt, parseAssCues, cuesToSrt, type SubCue } from '../player/subtitles'
-import { registerFontFaces } from '../player/fonts'
+import { loadFontManifest, registerFontFaces, toJassubFontConfig } from '../player/fonts'
+import { JassubHost } from '../player/jassubHost'
 import { Engine, type EngineStream, type PipelineKind } from '../player/engine'
 import { NativeEngine } from '../player/native'
 import type { BaseItem, MediaSource, MediaStream } from '../api/types'
@@ -262,6 +263,11 @@ export default function Player() {
     return () => clearInterval(timer)
   }, [status, openMenu])
 
+  const jassubRef = useRef<JassubHost | null>(null)
+  const getJassub = () => (jassubRef.current ??= new JassubHost())
+  const pipelineRef = useRef<PipelineKind>('unknown')
+  const lastNativeSubIdRef = useRef<number | null>(null)
+
   const supportsAc3 = useMemo(detectAc3Support, [])
   const profile = useMemo(() => buildDeviceProfile(supportsAc3), [supportsAc3])
 
@@ -276,51 +282,83 @@ export default function Player() {
       const track = subIndex === null ? undefined : subs.find((t) => t.index === subIndex)
       try {
         if (!track) {
+          await getJassub().detach()
           await engine.setNativeSubtitleEnabled(false)
+          lastNativeSubIdRef.current = null
           setTrCues([])
           setSubError('')
           return
         }
-        await engine.setNativeSubtitleEnabled(true)
         const s = srcRef.current
         if (s?.kind === 'direct') {
-          // 直连:优先用 libmedia demux 出的内嵌字幕轨(文本+PGS)
           const lm = engine
             .streams()
             .find((x) => x.mediaType === 'subtitle' && x.index === track.index)
             ?? engine.streams().find((x) => x.mediaType === 'subtitle')
-          if (lm) {
-            await engine.selectSubtitle(lm.id)
+          if (track.isGraphic) {
+            // PGS/DVB 位图:libass 画不了 → libmedia 原生渲染(同轨重复选择会刷错误日志,跳过)
+            await getJassub().detach()
+            await engine.setNativeSubtitleEnabled(true)
+            if (lm && lastNativeSubIdRef.current !== lm.id) {
+              await engine.selectSubtitle(lm.id)
+              lastNativeSubIdRef.current = lm.id
+            }
+            if (!lm) setSubError('图形字幕在该文件上不可用')
+            return
+          }
+          if (engine instanceof Engine) {
+            // 文本轨 → JASSUB(libass)接管:还原度高于 libmedia 内置渲染;
+            // 字幕内容走 Emby 提取接口(demux 出的轨不带完整 Style)
+            const vs = engine.streams().find((x) => x.mediaType === 'video')
+            const raw = await fetchSubtitleText(api, track, itemId!, mediaSourceRef.current!.Id)
+            const unified = toUnifiedAss(raw, vs?.width || 1280, vs?.height || 720)
+            setTrCues(parseAssCues(unified)) // 文稿面板数据
+            if (!surfaceRef.current) return
+            const cfg = toJassubFontConfig(await loadFontManifest())
+            try {
+              await getJassub().attach({
+                surface: surfaceRef.current,
+                assContent: unified,
+                availableFonts: cfg.availableFonts,
+                defaultFont: cfg.fallback || 'sans-serif',
+                video:
+                  pipelineRef.current === 'mse'
+                    ? engine.attachPoint().video
+                    : undefined,
+                getSec: () => engine.currentSec(),
+                videoWidth: vs?.width,
+                videoHeight: vs?.height,
+              })
+              setSubError('')
+              return
+            } catch (e) {
+              // JASSUB 起不来(环境不支持 worker 渲染等)→ 回退 libmedia 原生渲染
+              console.warn('[player] JASSUB 不可用,回退内置渲染', e)
+            }
+            await engine.setNativeSubtitleEnabled(false)
+            const lm2 = engine
+              .streams()
+              .find((x) => x.mediaType === 'subtitle' && x.index === track.index)
+            if (lm2 && lastNativeSubIdRef.current !== lm2.id) {
+              await engine.setNativeSubtitleEnabled(true)
+              await engine.selectSubtitle(lm2.id)
+              lastNativeSubIdRef.current = lm2.id
+            }
             setSubError('')
             return
           }
-          // 部分 MKV 的字幕轨 libmedia 解不出来(实测罪恶王冠:demux 0 字幕轨)
-          // → 回退 Emby 字幕提取,作为外挂字幕喂给引擎
-          if (track.isGraphic) {
-            setSubError('图形字幕在该文件上不可用')
-            return
-          }
+          // 原生 mp4 引擎:ASS → VTT 挂 <video> 文本轨
           const raw = await fetchSubtitleText(api, track, itemId!, mediaSourceRef.current!.Id)
           const unified = toUnifiedAss(raw, 1280, 720)
-          setTrCues(parseAssCues(unified)) // 文稿面板数据
-          // 原生引擎(mp4 渐进直连):ASS → VTT 挂 <video> 文本轨
-          if (!(engine instanceof Engine)) {
-            const vtt = assToVtt(unified)
-            const ne = engine as unknown as { setTextTrackVtt(v: string, l?: string): void }
-            if (typeof ne.setTextTrackVtt === 'function') {
-              ne.setTextTrackVtt(vtt, track.label)
-              setSubError('')
-            } else {
-              setSubError('该播放通道暂不支持字幕')
-            }
-            return
+          setTrCues(parseAssCues(unified))
+          const vtt = assToVtt(unified)
+          const ne = engine as unknown as { setTextTrackVtt(v: string, l?: string): void }
+          if (typeof ne.setTextTrackVtt === 'function') {
+            ne.setTextTrackVtt(vtt, track.label)
+            setSubError('')
+          } else {
+            setSubError('该播放通道暂不支持字幕')
           }
-          const file = new File([unified], `subtitle.${track.codec === 'ass' || track.codec === 'ssa' ? 'ass' : 'srt'}`, {
-            type: 'text/plain',
-          })
-          const extId = await engine.loadExternalSubtitle({ source: file, lang: track.codec, title: track.label })
-          await engine.selectSubtitle(extId)
-          setSubError('')
           return
         }
         // 转码通道(HLS):内嵌字幕轨不可用,同样走 Emby 提取
@@ -456,6 +494,7 @@ export default function Player() {
       },
       onError: (err: Error) => handleEngineError(err),
       onPipeline: (kind: PipelineKind, reason?: string) => {
+        pipelineRef.current = kind
         setPipeline(kind)
         setPipelineReason(reason ?? '')
       },
@@ -671,6 +710,9 @@ export default function Player() {
     return () => {
       loadTokenRef.current++
       clearTimeout(wd)
+      // 字幕宿主必须先于引擎销毁:旧实例不能再持有已销毁的渲染面(历史竞态根源)
+      void getJassub().detach()
+      lastNativeSubIdRef.current = null
       engineRef.current?.destroy().catch(() => {})
       if (engineRef.current === engine) engineRef.current = null
     }
