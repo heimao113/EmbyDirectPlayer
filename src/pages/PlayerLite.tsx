@@ -108,6 +108,8 @@ export default function PlayerLite() {
   const hintRef = useRef<number | undefined>(undefined)
   const srcRef = useRef<SrcInfo | null>(null)
   const extSubsPRef = useRef<Promise<Array<{ source: File; lang?: string; title?: string }>> | null>(null)
+  const extSubsLoadedRef = useRef<Array<{ source: File; lang?: string; title?: string }>>([])
+  const readyAtRef = useRef(0)
   const jassubRef = useRef<JassubHost | null>(null)
   const embeddedFontsRef = useRef<Uint8Array[] | null>(null)
   const lastAssRef = useRef<{ content: string; vw: number; vh: number } | null>(null)
@@ -322,6 +324,7 @@ export default function PlayerLite() {
     if (!player) return
     player.on(Events.LOADED, () => {
       startedRef.current = true
+      readyAtRef.current = Date.now()
       setStatus('ready')
       setStage('')
       let seek = pendingSeekRef.current
@@ -501,6 +504,7 @@ export default function PlayerLite() {
         // 字幕装载:不阻塞视频,ready 后尽快挂上
         const subs = await (extSubsPRef.current ?? Promise.resolve([]))
         if (cancelled) return
+        extSubsLoadedRef.current = subs
         for (const s of subs) {
           void player.loadExternalSubtitle(s).catch((err) => console.warn('[subtitle] 装载失败', err))
         }
@@ -678,6 +682,21 @@ export default function PlayerLite() {
   }, [status, api, itemId])
 
   // ---------- 看门狗:视频/音频停滞 ----------
+  // 重载恢复:load 会清掉外挂字幕,必须重新挂载,否则字幕退回内嵌渲染(样式/对位与主链路不一致)
+  const hardReload = useCallback(async (atSec: number) => {
+    const player = playerRef.current
+    if (!player || !srcRef.current) return
+    setStage('正在恢复播放…')
+    try {
+      await player.load(srcRef.current.url, { ext: srcRef.current.ext } as never)
+      for (const s of extSubsLoadedRef.current) {
+        void player.loadExternalSubtitle(s).catch(() => {})
+      }
+      if (atSec > 0) void player.seek(BigInt(Math.round(atSec * 1000))).catch(() => {})
+      void player.play().catch(() => {})
+    } catch { /* 失败则等下个周期再试 */ }
+  }, [])
+
   useEffect(() => {
     if (status !== 'ready') return
     const stall = { lastSec: 0, lastTs: 0, count: 0, reloadedAt: 0 }
@@ -693,15 +712,7 @@ export default function PlayerLite() {
           stall.count = 0
           stall.reloadedAt = now
           console.warn(`[player] 视频停滞,重载 @ ${sec.toFixed(1)}s`)
-          setStage('正在恢复播放…')
-          void player
-            .load(srcRef.current?.url ?? '', {
-              ext: srcRef.current?.ext,
-            } as never)
-            .then(() => {
-              void player.seek(BigInt(Math.round(sec * 1000))).catch(() => {})
-              void player.play().catch(() => {})
-            })
+          void hardReload(sec)
         }
       } else {
         stall.lastSec = sec
@@ -709,6 +720,8 @@ export default function PlayerLite() {
       }
       const stats = player.getStats()
       const hasAudio = (msRef.current?.MediaStreams?.some((x) => x.Type === 'Audio')) ?? false
+      // 慢启动宽限:起播后 20s 内不做音频重载判定(慢线路缓冲时解码帧率会读 0,误判重载会弄乱字幕)
+      const inGrace = now - readyAtRef.current < 20_000
       if (hasAudio && stats) {
         const alive = Number(stats.audioRenderFramerate ?? 0) > 0 || Number(stats.audioDecodeFramerate ?? 0) > 0
         if (alive) {
@@ -718,22 +731,17 @@ export default function PlayerLite() {
           if (audio.count === 4) {
             console.warn('[player] 音频渲染停滞,play() 恢复')
             void player.play().catch(() => {})
-          } else if (audio.count >= 8 && now - audio.lastAt > 60_000) {
+          } else if (audio.count >= 8 && !inGrace && now - audio.lastAt > 60_000) {
             audio.count = 0
             audio.lastAt = now
             console.warn(`[player] 音频恢复无效,重载 @ ${sec.toFixed(1)}s`)
-            void player
-              .load(srcRef.current?.url ?? '', { ext: srcRef.current?.ext } as never)
-              .then(() => {
-                void player.seek(BigInt(Math.round(sec * 1000))).catch(() => {})
-                void player.play().catch(() => {})
-              })
+            void hardReload(sec)
           }
         }
       }
     }, 1000)
     return () => clearInterval(timer)
-  }, [status, src])
+  }, [status, src, hardReload])
 
 
   // ---------- 控制处理 ----------
