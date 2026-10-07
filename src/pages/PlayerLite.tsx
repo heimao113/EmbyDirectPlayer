@@ -321,6 +321,40 @@ export default function PlayerLite() {
     ;(window as unknown as Record<string, unknown>).__litePlayer = player
   }, [])
 
+
+  // ---------- 全局崩溃捕获:手机浏览器上渲染/解码异常时把原因直接显示在页面上 ----------
+  useEffect(() => {
+    const show = (msg: string) => {
+      try {
+        let box = document.getElementById('ewp-fatal')
+        if (!box) {
+          box = document.createElement('div')
+          box.id = 'ewp-fatal'
+          box.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;background:rgba(40,10,16,0.94);color:#ffb4c4;border:1px solid rgba(255,107,157,0.4);border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.5;word-break:break-all;max-height:40vh;overflow:auto'
+          const copy = document.createElement('button')
+          copy.textContent = '复制错误'
+          copy.style.cssText = 'margin-top:6px;padding:4px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.25);background:transparent;color:#fff;font-size:12px'
+          copy.onclick = () => { navigator.clipboard?.writeText(box?.dataset.msg ?? msg).catch(() => {}) }
+          box.appendChild(copy)
+          document.body.appendChild(box)
+        }
+        box.dataset.msg = msg
+        const text = document.createElement('div')
+        text.textContent = msg
+        box.insertBefore(text, box.firstChild)
+      } catch { /* ignore */ }
+    }
+    const onErr = (e: ErrorEvent) => { if (e.message) show('JS错误: ' + e.message) }
+    const onRej = (e: PromiseRejectionEvent) => { show('Promise拒绝: ' + String(e.reason?.message ?? e.reason)) }
+    window.addEventListener('error', onErr)
+    window.addEventListener('unhandledrejection', onRej)
+    return () => {
+      window.removeEventListener('error', onErr)
+      window.removeEventListener('unhandledrejection', onRej)
+      document.getElementById('ewp-fatal')?.remove()
+    }
+  }, [])
+
   // ---------- 生命周期事件绑定(一次) ----------
   useEffect(() => {
     const player = playerRef.current
@@ -342,6 +376,12 @@ export default function PlayerLite() {
         void player.seek(BigInt(Math.round(seek * 1000))).catch(() => {})
       }
       void player.play().catch(() => {})
+    })
+    player.on(Events.ERROR, (...args: unknown[]) => {
+      const e = args[1] ?? args[0]
+      console.error('[player] libmedia ERROR', args)
+      setStatus('error')
+      setErrText('播放内核错误: ' + String((e as { message?: string })?.message ?? e).slice(0, 300))
     })
     player.on(Events.PAUSED, () => { pausedRef.current = true; setPaused(true) })
     player.on(Events.PLAYED, () => { pausedRef.current = false; setPaused(false) })
@@ -390,6 +430,18 @@ export default function PlayerLite() {
     setBilingualStripPref(getBilingualStripPref())
     ;(async () => {
       try {
+        // 手机浏览器(尤其部分国产浏览器)WebGL 被禁时视频无法渲染,提前给出明确提示
+        const glOk = (() => {
+          try {
+            const t = document.createElement('canvas')
+            return !!(t.getContext('webgl2') || t.getContext('webgl'))
+          } catch { return false }
+        })()
+        if (!glOk) {
+          setStatus('error')
+          setErrText('当前浏览器不支持 WebGL 视频渲染(部分安卓自带/加速浏览器常见)。请改用 Chrome,或在浏览器设置里关闭「云端加速/极速模式」,或切换「电脑版网页」后重试。')
+          return
+        }
         const it = await api.item(itemId)
         if (cancelled) return
         setItem(it)
@@ -844,9 +896,10 @@ export default function PlayerLite() {
     const wake = () => {
       setShowControls(true)
       if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current)
+      const coarse = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
       hideTimerRef.current = window.setTimeout(() => {
         if (!pausedRef.current) setShowControls(false)
-      }, 3000)
+      }, coarse ? 8000 : 3000)
     }
     wake()
     const el = shellRef.current
