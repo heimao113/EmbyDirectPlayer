@@ -160,6 +160,8 @@ export default function PlayerLite() {
   const vDeadReloadCountRef = useRef(0)
   // escalateToMSE 在后方定义,经由 ref 转发给更早绑定的事件处理器
   const escalateRef = useRef<(reason: string) => void>(() => {})
+  // 本次点击用于恢复声音(刷新后 AudioContext 被挂起)时,抑制其播放/暂停切换
+  const audioRecoveringRef = useRef(false)
   // 方向锁定失败(部分安卓内核在全屏切换中会 cancel lock)→ CSS 旋转 90° 模拟横屏(B 站同款兜底)
   const [forceLandscape, setForceLandscape] = useState(false)
   const orientRetryRef = useRef<number[]>([])
@@ -441,6 +443,7 @@ export default function PlayerLite() {
     } as never)
     playerRef.current = player
     ;(window as unknown as Record<string, unknown>).__litePlayer = player
+    ;(window as unknown as Record<string, unknown>).__AVP = AVPlayer
   }, [])
 
 
@@ -448,19 +451,24 @@ export default function PlayerLite() {
   const recoverAudioCtx = useCallback(() => {
     try {
       const AP = AVPlayer as unknown as { isAudioContextSuspended?: () => boolean; startAudioContext?: () => Promise<void> }
-      if (AP.isAudioContextSuspended?.()) {
-        void AP.startAudioContext?.().then(() => {
-          audioAliveRef.current = true
-          setAudioDead(false)
-          void playerRef.current?.play().catch(() => {})
-        }).catch(() => {})
+      const p = playerRef.current as unknown as { resume?: () => Promise<void> } | null
+      const kick = async () => {
+        if (AP.isAudioContextSuspended?.()) await AP.startAudioContext?.()
+        // 音频管线自身的恢复接口(刷新后管线可能停在暂停态)
+        await p?.resume?.()
+        await playerRef.current?.play().catch(() => {})
       }
+      void kick()
     } catch { /* ignore */ }
   }, [])
   useEffect(() => {
     if (status !== 'ready') return
     const onGesture = () => {
-      if (!audioAliveRef.current) recoverAudioCtx()
+      if (!audioAliveRef.current) {
+        audioRecoveringRef.current = true
+        window.setTimeout(() => { audioRecoveringRef.current = false }, 900)
+        recoverAudioCtx()
+      }
     }
     document.addEventListener('pointerdown', onGesture)
     document.addEventListener('keydown', onGesture)
@@ -989,7 +997,8 @@ export default function PlayerLite() {
         } catch { /* ignore */ }
         if (suspended) {
           setAudioDead(true)
-          console.warn('[player] AudioContext 被挂起,等待用户手势恢复')
+          console.warn('[player] AudioContext 被挂起,自动尝试恢复 + 提示点击')
+          recoverAudioCtx()
         } else {
           console.warn('[player] 起播 20 秒无音频渲染,软重载恢复')
           void hardReload(sec)
@@ -1394,6 +1403,12 @@ export default function PlayerLite() {
           tapStartedVisibleRef.current = showControls
         }}
         onClick={(e) => {
+          // 本次点击用于恢复声音(刷新后无声),不切换播放/暂停
+          if (audioRecoveringRef.current) {
+            audioRecoveringRef.current = false
+            armHide()
+            return
+          }
           // 触屏:单击呼出/隐藏控制栏;双击分区 —— 左 40% 快退 10s,右 40% 快进 10s,中间播放/暂停(B 站交互)
           if (coarsePointerRef.current) {
             const now = Date.now()
