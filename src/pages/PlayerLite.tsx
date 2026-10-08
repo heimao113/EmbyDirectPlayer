@@ -206,6 +206,8 @@ export default function PlayerLite() {
   const demuxErrCountRef = useRef(0)
   const lowFpsTicksRef = useRef(0)
   const vDeadReloadCountRef = useRef(0)
+  // 通道升级时记录实时位置,重新 resolve 后从这里续播
+  const escalateSeekRef = useRef<number | null>(null)
   // escalateToMSE 在后方定义,经由 ref 转发给更早绑定的事件处理器
   const escalateRef = useRef<(reason: string) => void>(() => {})
   // 本次点击用于恢复声音(刷新后 AudioContext 被挂起)时,抑制其播放/暂停切换
@@ -245,6 +247,8 @@ export default function PlayerLite() {
   const [subMenuTracks, setSubMenuTracks] = useState<Array<{ embyIndex: number; label: string }>>([])
   const [selectedSubEmby, setSelectedSubEmby] = useState<number | null>(null)
   const preferredSubEmbyRef = useRef(0)
+  // 通道升级计数:变更触发 init effect 完整重新 resolve
+  const [resolveNonce, setResolveNonce] = useState(0)
   const extSubStreamIdOfRef = useRef<Map<number, number>>(new Map())
   const [showControls, setShowControls] = useState(true)
   const [openMenu, setOpenMenu] = useState<'audio' | 'speed' | 'sub' | null>(null)
@@ -756,6 +760,11 @@ export default function PlayerLite() {
         if (canDirect) {
           const pos = (it.UserData?.PlaybackPositionTicks ?? 0) / 10_000_000
           pendingSeekRef.current = pos > 10 ? pos - 0.75 : 0
+          // 通道升级重建会话:以升级瞬间的实时位置为准(比服务器上报的更接近当前)
+          if (escalateSeekRef.current != null) {
+            pendingSeekRef.current = Math.max(0, escalateSeekRef.current - 0.5)
+            escalateSeekRef.current = null
+          }
           setBadge('直连')
           setSrc({
             // 不带媒体扩展名:避开手机浏览器"媒体嗅探"弹出下载面板(嗅探器按 .mp4/.mkv 后缀抓)
@@ -788,7 +797,7 @@ export default function PlayerLite() {
     return () => {
       cancelled = true
     }
-  }, [api, itemId, navigate, profile])
+  }, [api, itemId, navigate, profile, resolveNonce])
 
   // ---------- 换源加载(官方 LoadOptions) ----------
   useEffect(() => {
@@ -1217,15 +1226,18 @@ export default function PlayerLite() {
     })
   }, [])
 
-  // 设备自适应升级:MSE 兼容通道(切换后软重载重新协商管线)
+  // 设备自适应升级:MSE 兼容通道。关键:不复用旧 URL/旧 PlaySession(可能已失效),
+  // 而是完整重新 resolve(全新会话)+ 从实时位置续播
   const escalateToMSE = useCallback((reason: string) => {
     if (useMseRef.current) return
     useMseRef.current = true
-    reportFatal('已切换兼容解码通道(MSE): ' + reason)
-    kickResize()
+    demuxErrCountRef.current = 0
+    vDeadReloadCountRef.current = 0
     const sec = Number(playerRef.current?.currentTime ?? 0) / 1000
-    void hardReload(sec)
-  }, [hardReload, kickResize])
+    escalateSeekRef.current = sec > 5 ? sec : null
+    reportFatal('已切换兼容解码通道(MSE)并重新建立会话: ' + reason)
+    setResolveNonce((n) => n + 1)
+  }, [])
   escalateRef.current = escalateToMSE
 
   const toggleFullscreen = useCallback(() => {
