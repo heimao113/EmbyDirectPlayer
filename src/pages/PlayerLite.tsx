@@ -352,8 +352,23 @@ export default function PlayerLite() {
         box.insertBefore(text, box.firstChild)
       } catch { /* ignore */ }
     }
-    const onErr = (e: ErrorEvent) => { if (e.message) show('JS错误: ' + e.message) }
-    const onRej = (e: PromiseRejectionEvent) => { show('Promise拒绝: ' + String(e.reason?.message ?? e.reason)) }
+    // 这些是播放内核的良性噪音(初始化竞态/自动播放策略中断),不影响播放,不展示
+    const BENIGN = [
+      'player status is not loaded',
+      'The play() request was interrupted',
+      'interacted with the',
+      'AbortError',
+      'exitFullscreen',
+      ' lock',
+    ]
+    const benign = (m: string) => BENIGN.some((p) => m.includes(p))
+    const onErr = (e: ErrorEvent) => {
+      if (e.message && !benign(e.message)) show('JS错误: ' + e.message)
+    }
+    const onRej = (e: PromiseRejectionEvent) => {
+      const m = String(e.reason?.message ?? e.reason)
+      if (!benign(m)) show('Promise拒绝: ' + m)
+    }
     window.addEventListener('error', onErr)
     window.addEventListener('unhandledrejection', onRej)
     return () => {
@@ -386,10 +401,29 @@ export default function PlayerLite() {
       void player.play().catch(() => {})
     })
     player.on(Events.ERROR, (...args: unknown[]) => {
+      // 内核 ERROR 不都是致命的(如 IO 重试、加载竞态):只记录到浮层,不打断播放
       const e = args[1] ?? args[0]
+      const msg = String((e as { message?: string })?.message ?? e).slice(0, 300)
       console.error('[player] libmedia ERROR', args)
-      setStatus('error')
-      setErrText('播放内核错误: ' + String((e as { message?: string })?.message ?? e).slice(0, 300))
+      try {
+        let box = document.getElementById('ewp-fatal')
+        if (!box) {
+          box = document.createElement('div')
+          box.id = 'ewp-fatal'
+          box.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;background:rgba(40,10,16,0.94);color:#ffb4c4;border:1px solid rgba(255,107,157,0.4);border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.5;word-break:break-all;max-height:40vh;overflow:auto'
+          const copy = document.createElement('button')
+          copy.textContent = '复制错误'
+          copy.style.cssText = 'margin-top:6px;padding:4px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.25);background:transparent;color:#fff;font-size:12px'
+          copy.onclick = () => { navigator.clipboard?.writeText(box?.dataset.msg ?? msg).catch(() => {}) }
+          box.appendChild(copy)
+          document.body.appendChild(box)
+        }
+        box.dataset.msg = msg
+        const text = document.createElement('div')
+        text.textContent = '内核: ' + msg
+        box.insertBefore(text, box.firstChild)
+        while (box.children.length > 5) box.removeChild(box.children[box.children.length - 2])
+      } catch { /* ignore */ }
     })
     player.on(Events.PAUSED, () => { pausedRef.current = true; setPaused(true) })
     player.on(Events.PLAYED, () => { pausedRef.current = false; setPaused(false) })
