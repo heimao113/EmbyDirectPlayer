@@ -151,6 +151,8 @@ export default function PlayerLite() {
   const lastUiTickRef = useRef(0)
   const tapStartedVisibleRef = useRef(false)
   const vDeadCountRef = useRef(0)
+  // 音频存活以内核事件为准(FIRST_AUDIO_RENDERED);帧率统计在 wasm 模式恒为 0,不可作依据
+  const audioAliveRef = useRef(false)
   // 设备自适应:默认 wasm(规格 §6),检测到 wasm 撑不住(解封装失败/帧率过低/反复无渲染)的设备升级 MSE
   const useMseRef = useRef(false)
   const demuxErrCountRef = useRef(0)
@@ -502,6 +504,10 @@ export default function PlayerLite() {
       }
       reportFatal('内核: ' + msg)
     })
+    // 音频/首帧权威信号
+    player.on(Events.FIRST_AUDIO_RENDERED, () => { audioAliveRef.current = true })
+    player.on(Events.AUDIO_CONTEXT_RUNNING, () => { audioAliveRef.current = true })
+    player.on(Events.FIRST_VIDEO_RENDERED, () => setGotFirstFrame(true))
     player.on(Events.PAUSED, () => { pausedRef.current = true; setPaused(true) })
     player.on(Events.PLAYED, () => { pausedRef.current = false; setPaused(false) })
     player.on(Events.TIME, () => {
@@ -905,6 +911,7 @@ export default function PlayerLite() {
     if (reloadingRef.current) return
     reloadingRef.current = true
     setGotFirstFrame(false)
+    audioAliveRef.current = false
     setStage('正在恢复播放…')
     try {
       await player.load(srcRef.current.url, { ext: srcRef.current.ext } as never)
@@ -938,28 +945,13 @@ export default function PlayerLite() {
         stall.lastSec = sec
         stall.lastTs = now
       }
-      const stats = player.getStats()
+      // 音频存活守卫:内核 FIRST_AUDIO_RENDERED 事件为准(帧率统计 wasm 下恒 0,不可靠)。
+      // 有音频轨但起播 20 秒仍无音频渲染(含"刷新后无声")→ 软重载恢复,每 60 秒至多一次
       const hasAudio = (msRef.current?.MediaStreams?.some((x) => x.Type === 'Audio')) ?? false
-      // 慢启动宽限:起播后 20s 内不做音频重载判定(慢线路缓冲时解码帧率会读 0,误判重载会弄乱字幕)
-      const inGrace = now - readyAtRef.current < 20_000
-      if (hasAudio && stats) {
-        const alive = Number(stats.audioRenderFramerate ?? 0) > 0 || Number(stats.audioDecodeFramerate ?? 0) > 0
-        // seek 后音频更容易掉线:近 6 秒内有过 seek 时,判定加快且不受启动宽限限制
-        const seekBoost = now - lastSeekDoneRef.current < 6000
-        if (alive) {
-          audio.count = 0
-        } else {
-          audio.count += 1
-          if (audio.count === 4) {
-            console.warn('[player] 音频渲染停滞,play() 恢复')
-            void player.play().catch(() => {})
-          } else if (audio.count >= (seekBoost ? 3 : 8) && (!inGrace || seekBoost) && now - audio.lastAt > 60_000) {
-            audio.count = 0
-            audio.lastAt = now
-            console.warn(`[player] 音频恢复无效,重载 @ ${sec.toFixed(1)}s`)
-            void hardReload(sec)
-          }
-        }
+      if (hasAudio && !audioAliveRef.current && !pausedRef.current && now - readyAtRef.current > 20_000 && now - audio.lastAt > 60_000) {
+        audio.lastAt = now
+        console.warn('[player] 起播 20 秒无音频渲染,软重载恢复')
+        void hardReload(sec)
       }
     }, 1000)
     return () => clearInterval(timer)
