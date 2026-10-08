@@ -513,24 +513,6 @@ export default function PlayerLite() {
   useEffect(() => {
     const player = playerRef.current
     if (!player) return
-    player.on(Events.LOADED, () => {
-      startedRef.current = true
-      readyAtRef.current = Date.now()
-      setStatus('ready')
-      setStage('')
-      let seek = pendingSeekRef.current
-      pendingSeekRef.current = 0
-      try {
-        // 二次校验:续播点超出片长(历史坏数据)→ 回到开头,播放后立即回写正确进度自愈
-        const durMs = Number(player.getDuration())
-        const durSec = durMs > 0 ? durMs / 1000 : 0
-        if (durSec > 0 && seek > durSec - 5) seek = 0
-      } catch { /* ignore */ }
-      if (seek > 0) {
-        void player.seek(BigInt(Math.round(seek * 1000))).catch(() => {})
-      }
-      void player.play().catch(() => {})
-    })
     player.on(Events.ERROR, (...args: unknown[]) => {
       // 内核 ERROR 不都是致命的(如 IO 重试、加载竞态):只记录到浮层,不打断播放
       const e = args[1] ?? args[0]
@@ -546,6 +528,40 @@ export default function PlayerLite() {
     player.on(Events.FIRST_AUDIO_RENDERED, () => { audioAliveRef.current = true; setAudioDead(false) })
     player.on(Events.AUDIO_CONTEXT_RUNNING, () => { audioAliveRef.current = true; setAudioDead(false) })
     player.on(Events.FIRST_VIDEO_RENDERED, () => setGotFirstFrame(true))
+    // 续播自愈:LOADED 时刻管线可能尚未可 seek(静默失败→从头播),2.5 秒后校验实际位置,未到位重发一次
+    const verifySeek = (target: number) => {
+      window.setTimeout(() => {
+        const p = playerRef.current
+        if (!p || reloadingRef.current) return
+        if (seekLockRef.current || Date.now() - lastSeekDoneRef.current < 2500) return
+        if (pausedRef.current) return
+        const nowSec = Number(p.currentTime ?? 0) / 1000
+        if (Math.abs(nowSec - target) > 3) {
+          console.warn(`[resume] 续播未生效(${nowSec.toFixed(1)}s ≠ ${target.toFixed(1)}s),重新 seek`)
+          lastSeekDoneRef.current = Date.now()
+          void p.seek(BigInt(Math.round(target * 1000))).catch(() => {})
+        }
+      }, 2500)
+    }
+    player.on(Events.LOADED, () => {
+      startedRef.current = true
+      readyAtRef.current = Date.now()
+      setStatus('ready')
+      setStage('')
+      let seek = pendingSeekRef.current
+      pendingSeekRef.current = 0
+      try {
+        // 二次校验:续播点超出片长(历史坏数据)→ 回到开头,播放后立即回写正确进度自愈
+        const durMs = Number(player.getDuration())
+        const durSec = durMs > 0 ? durMs / 1000 : 0
+        if (durSec > 0 && seek > durSec - 5) seek = 0
+      } catch { /* ignore */ }
+      if (seek > 0) {
+        void player.seek(BigInt(Math.round(seek * 1000))).catch(() => {})
+        verifySeek(seek)
+      }
+      void player.play().catch(() => {})
+    })
     player.on(Events.PAUSED, () => { pausedRef.current = true; setPaused(true) })
     player.on(Events.PLAYED, () => { pausedRef.current = false; setPaused(false) })
     player.on(Events.TIME, () => {
@@ -954,7 +970,19 @@ export default function PlayerLite() {
     try {
       await player.load(srcRef.current.url, { ext: srcRef.current.ext } as never)
       await attachSubtitles()
-      if (atSec > 0) void player.seek(BigInt(Math.round(atSec * 1000))).catch(() => {})
+      if (atSec > 0) {
+        void player.seek(BigInt(Math.round(atSec * 1000))).catch(() => {})
+        // 软重载后的 seek 同样校验一次(MSE 升级后的重协商窗口可能吞掉首次 seek)
+        window.setTimeout(() => {
+          const p = playerRef.current
+          if (!p || reloadingRef.current) return
+          const nowSec = Number(p.currentTime ?? 0) / 1000
+          if (Math.abs(nowSec - atSec) > 3) {
+            console.warn(`[reload] 恢复位置未生效(${nowSec.toFixed(1)}s ≠ ${atSec.toFixed(1)}s),重新 seek`)
+            void p.seek(BigInt(Math.round(atSec * 1000))).catch(() => {})
+          }
+        }, 2500)
+      }
       void player.play().catch(() => {})
     } catch { /* 失败则等下个周期再试 */ } finally {
       reloadingRef.current = false
