@@ -590,7 +590,8 @@ export default function PlayerLite() {
           pendingSeekRef.current = pos > 30 ? pos - 0.75 : 0
           setBadge('直连')
           setSrc({
-            url: api.mediaUrl(`/emby/Videos/${itemId}/stream.${container}`, {
+            // 不带媒体扩展名:避开手机浏览器"媒体嗅探"弹出下载面板(嗅探器按 .mp4/.mkv 后缀抓)
+            url: api.mediaUrl(`/emby/Videos/${itemId}/stream`, {
               Static: true,
               MediaSourceId: ms.Id,
               PlaySessionId: info.PlaySessionId ?? '',
