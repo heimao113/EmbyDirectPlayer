@@ -1641,3 +1641,12 @@ canvas.JASSUB { pointer-events: none !important; }
   border: 2px solid rgba(255,255,255,0.25); border-top-color: var(--accent-2);
   animation: ewp-spin 0.9s linear infinite;
 }
+
+/* ===== 无声提示(刷新后 AudioContext 被挂起) ===== */
+.ui-audiohint {
+  position: absolute; top: 64px; left: 50%; transform: translateX(-50%);
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(255, 77, 148, 0.16); border: 1px solid rgba(255, 107, 157, 0.45);
+  color: #ffbcd4; font-size: 12.5px; padding: 8px 16px; border-radius: 999px;
+  cursor: pointer; z-index: 30; backdrop-filter: blur(8px);
+}

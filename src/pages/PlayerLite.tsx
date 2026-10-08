@@ -164,6 +164,8 @@ export default function PlayerLite() {
   const [forceLandscape, setForceLandscape] = useState(false)
   const orientRetryRef = useRef<number[]>([])
   const [gotFirstFrame, setGotFirstFrame] = useState(false)
+  // 刷新后自动播放策略会挂起 AudioContext(视频 canvas 照走、无声):需要用户手势恢复
+  const [audioDead, setAudioDead] = useState(false)
   const [seekFlash, setSeekFlash] = useState<{ side: 'l' | 'r' } | null>(null)
   const flashTimerRef = useRef<number | undefined>(undefined)
   const flashSeek = useCallback((side: 'l' | 'r') => {
@@ -442,6 +444,34 @@ export default function PlayerLite() {
   }, [])
 
 
+  // ---------- 用户手势恢复音频上下文(刷新后自动播放策略挂起 AudioContext 导致无声) ----------
+  const recoverAudioCtx = useCallback(() => {
+    try {
+      const AP = AVPlayer as unknown as { isAudioContextSuspended?: () => boolean; startAudioContext?: () => Promise<void> }
+      if (AP.isAudioContextSuspended?.()) {
+        void AP.startAudioContext?.().then(() => {
+          audioAliveRef.current = true
+          setAudioDead(false)
+          void playerRef.current?.play().catch(() => {})
+        }).catch(() => {})
+      }
+    } catch { /* ignore */ }
+  }, [])
+  useEffect(() => {
+    if (status !== 'ready') return
+    const onGesture = () => {
+      if (!audioAliveRef.current) recoverAudioCtx()
+    }
+    document.addEventListener('pointerdown', onGesture)
+    document.addEventListener('keydown', onGesture)
+    document.addEventListener('touchstart', onGesture, { passive: true })
+    return () => {
+      document.removeEventListener('pointerdown', onGesture)
+      document.removeEventListener('keydown', onGesture)
+      document.removeEventListener('touchstart', onGesture)
+    }
+  }, [status, recoverAudioCtx])
+
   // ---------- 全局崩溃捕获:手机浏览器上渲染/解码异常时把原因直接显示在页面上 ----------
   useEffect(() => {
     const show = (msg: string) => reportFatal(msg)
@@ -505,8 +535,8 @@ export default function PlayerLite() {
       reportFatal('内核: ' + msg)
     })
     // 音频/首帧权威信号
-    player.on(Events.FIRST_AUDIO_RENDERED, () => { audioAliveRef.current = true })
-    player.on(Events.AUDIO_CONTEXT_RUNNING, () => { audioAliveRef.current = true })
+    player.on(Events.FIRST_AUDIO_RENDERED, () => { audioAliveRef.current = true; setAudioDead(false) })
+    player.on(Events.AUDIO_CONTEXT_RUNNING, () => { audioAliveRef.current = true; setAudioDead(false) })
     player.on(Events.FIRST_VIDEO_RENDERED, () => setGotFirstFrame(true))
     player.on(Events.PAUSED, () => { pausedRef.current = true; setPaused(true) })
     player.on(Events.PLAYED, () => { pausedRef.current = false; setPaused(false) })
@@ -946,12 +976,24 @@ export default function PlayerLite() {
         stall.lastTs = now
       }
       // 音频存活守卫:内核 FIRST_AUDIO_RENDERED 事件为准(帧率统计 wasm 下恒 0,不可靠)。
-      // 有音频轨但起播 20 秒仍无音频渲染(含"刷新后无声")→ 软重载恢复,每 60 秒至多一次
+      // 有音频轨但起播 20 秒仍无音频渲染:
+      //   a) AudioContext 被自动播放策略挂起(刷新后常见)→ 恢复上下文 + 提示点击,重载无效不重载
+      //   b) 上下文在跑但仍无渲染(管线真死)→ 软重载恢复,每 60 秒至多一次
       const hasAudio = (msRef.current?.MediaStreams?.some((x) => x.Type === 'Audio')) ?? false
       if (hasAudio && !audioAliveRef.current && !pausedRef.current && now - readyAtRef.current > 20_000 && now - audio.lastAt > 60_000) {
         audio.lastAt = now
-        console.warn('[player] 起播 20 秒无音频渲染,软重载恢复')
-        void hardReload(sec)
+        let suspended = false
+        try {
+          const AP = AVPlayer as unknown as { isAudioContextSuspended?: () => boolean }
+          suspended = !!AP.isAudioContextSuspended?.()
+        } catch { /* ignore */ }
+        if (suspended) {
+          setAudioDead(true)
+          console.warn('[player] AudioContext 被挂起,等待用户手势恢复')
+        } else {
+          console.warn('[player] 起播 20 秒无音频渲染,软重载恢复')
+          void hardReload(sec)
+        }
       }
     }, 1000)
     return () => clearInterval(timer)
@@ -1496,6 +1538,18 @@ export default function PlayerLite() {
       )}
       {status === 'ready' && startedRef.current && !gotFirstFrame && !paused && (
         <div className="ui-warmup">软解启动中,首次出画面可能需要几秒…</div>
+      )}
+      {audioDead && status === 'ready' && !paused && (
+        <button
+          className="ui-audiohint"
+          onClick={(e) => {
+            e.stopPropagation()
+            recoverAudioCtx()
+            setAudioDead(false)
+          }}
+        >
+          🔇 无声?点击开启声音
+        </button>
       )}
       {seekFlash && (
         <div
