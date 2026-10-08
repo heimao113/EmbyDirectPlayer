@@ -166,7 +166,6 @@ export default function PlayerLite() {
   const playerRef = useRef<AVPlayer | null>(null)
   const msRef = useRef<MediaSource | null>(null)
   const playSessionRef = useRef<string | undefined>(undefined)
-  const pendingSeekRef = useRef(0)
   const startedRef = useRef(false)
   const pausedRef = useRef(false)
   const extSubsRef = useRef<ExtSubInfo[] | null>(null)
@@ -206,8 +205,6 @@ export default function PlayerLite() {
   const demuxErrCountRef = useRef(0)
   const lowFpsTicksRef = useRef(0)
   const vDeadReloadCountRef = useRef(0)
-  // 通道升级时记录实时位置,重新 resolve 后从这里续播
-  const escalateSeekRef = useRef<number | null>(null)
   // escalateToMSE 在后方定义,经由 ref 转发给更早绑定的事件处理器
   const escalateRef = useRef<(reason: string) => void>(() => {})
   // 本次点击用于恢复声音(刷新后 AudioContext 被挂起)时,抑制其播放/暂停切换
@@ -588,39 +585,11 @@ export default function PlayerLite() {
     player.on(Events.FIRST_AUDIO_RENDERED, () => { audioAliveRef.current = true; setAudioDead(false) })
     player.on(Events.AUDIO_CONTEXT_RUNNING, () => { audioAliveRef.current = true; setAudioDead(false) })
     player.on(Events.FIRST_VIDEO_RENDERED, () => setGotFirstFrame(true))
-    // 续播自愈:LOADED 时刻管线可能尚未可 seek(静默失败→从头播),2.5 秒后校验实际位置,未到位重发一次
-    const verifySeek = (target: number) => {
-      window.setTimeout(() => {
-        const p = playerRef.current
-        if (!p || reloadingRef.current) return
-        // 注意:暂停中也要校验——刷新后可能因音频上下文挂起被主动暂停,
-        // 此时若初始 seek 静默失败,必须把位置纠正回来,否则用户恢复声音后从头播/字幕错位
-        if (seekLockRef.current || Date.now() - lastSeekDoneRef.current < 2500) return
-        const nowSec = Number(p.currentTime ?? 0) / 1000
-        if (Math.abs(nowSec - target) > 3) {
-          console.warn(`[resume] 续播未生效(${nowSec.toFixed(1)}s ≠ ${target.toFixed(1)}s),重新 seek`)
-          lastSeekDoneRef.current = Date.now()
-          void p.seek(BigInt(Math.round(target * 1000))).catch(() => {})
-        }
-      }, 2500)
-    }
     player.on(Events.LOADED, () => {
       startedRef.current = true
       readyAtRef.current = Date.now()
       setStatus('ready')
       setStage('')
-      let seek = pendingSeekRef.current
-      pendingSeekRef.current = 0
-      try {
-        // 二次校验:续播点超出片长(历史坏数据)→ 回到开头,播放后立即回写正确进度自愈
-        const durMs = Number(player.getDuration())
-        const durSec = durMs > 0 ? durMs / 1000 : 0
-        if (durSec > 0 && seek > durSec - 5) seek = 0
-      } catch { /* ignore */ }
-      if (seek > 0) {
-        void player.seek(BigInt(Math.round(seek * 1000))).catch(() => {})
-        verifySeek(seek)
-      }
       smartPlay()
     })
     player.on(Events.PAUSED, () => { pausedRef.current = true; setPaused(true) })
@@ -765,13 +734,7 @@ export default function PlayerLite() {
         }
 
         if (canDirect) {
-          const pos = (it.UserData?.PlaybackPositionTicks ?? 0) / 10_000_000
-          pendingSeekRef.current = pos > 10 ? pos - 0.75 : 0
-          // 通道升级重建会话:以升级瞬间的实时位置为准(比服务器上报的更接近当前)
-          if (escalateSeekRef.current != null) {
-            pendingSeekRef.current = Math.max(0, escalateSeekRef.current - 0.5)
-            escalateSeekRef.current = null
-          }
+          // 直接重开:不做续播跳转,省去"跳转→重新拉段→预解码"的等待链,起播接近秒播
           setBadge('直连')
           setSrc({
             // 不带媒体扩展名:避开手机浏览器"媒体嗅探"弹出下载面板(嗅探器按 .mp4/.mkv 后缀抓)
@@ -1113,28 +1076,14 @@ export default function PlayerLite() {
     const doSeek = () => {
       const player = playerRef.current
       if (!player) return
-      // 软重载进行中:worker 正在重建,seek 转为待执行
-      if (reloadingRef.current) {
-        pendingSeekRef.current = target
-        return
-      }
-      // 时长未知(demux 异常/未就绪)时 seek 会触发内核 BigInt 除零,转待执行
-      if (!dur) {
-        pendingSeekRef.current = target
+      // 软重载进行中或时长未知时跳过本次 seek(用户再点一次即可)
+      if (reloadingRef.current || !dur) {
         return
       }
       try {
-        // demux 流未就绪(刚加载/加载中)时 seek 会崩 → 转为 LOADED 后应用的待执行 seek
-        const ready = ((player.getStreams?.() ?? []) as unknown as Array<unknown>).length > 0
-        if (!ready) {
-          pendingSeekRef.current = target
-          return
-        }
         lastSeekDoneRef.current = Date.now()
         void player.seek(BigInt(Math.round(target * 1000))).catch(() => {})
-      } catch {
-        pendingSeekRef.current = target
-      }
+      } catch { /* 忽略,用户可重试 */ }
     }
     // 连击合并:350ms 内的连续 seek(双击快进/键盘连按/拖动)只执行最后一次,
     // 高频 seek 会把 wasm 解码器打进出错状态(音轨掉/字幕乱)
@@ -1240,8 +1189,6 @@ export default function PlayerLite() {
     useMseRef.current = true
     demuxErrCountRef.current = 0
     vDeadReloadCountRef.current = 0
-    const sec = Number(playerRef.current?.currentTime ?? 0) / 1000
-    escalateSeekRef.current = sec > 5 ? sec : null
     reportFatal('已切换兼容解码通道(MSE)并重新建立会话: ' + reason)
     setResolveNonce((n) => n + 1)
   }, [])
