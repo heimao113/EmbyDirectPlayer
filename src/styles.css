@@ -1564,10 +1564,16 @@ canvas.JASSUB { pointer-events: none !important; }
 }
 
 @media (max-width: 768px) {
-  /* 手机用物理音量键,隐藏音量控件为全屏键腾位 */
-  .ui-volume { display: none !important; }
-  .ui-time { white-space: nowrap; font-size: 11.5px; }
-  .ui-buttons button { min-width: 30px; }
+  /* 手机用物理音量键:静音钮与音量条都隐藏,保证全屏键在屏内 */
+  .ui-volume, .ui-mute { display: none !important; }
+  .ui-controls { padding: 4px 6px 8px; }
+  .ui-buttons { gap: 3px; flex-wrap: nowrap; }
+  .ui-buttons button {
+    min-width: 32px; height: 32px; padding: 0 3px;
+    font-size: 12px; white-space: nowrap; flex-shrink: 0;
+  }
+  .ui-time { font-size: 11px; white-space: nowrap; flex-shrink: 0; padding: 0 2px; }
+  .ui-menu-item { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 }
 
 /* ===== B 站式进度条与交互反馈 ===== */

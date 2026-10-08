@@ -1554,7 +1554,7 @@ export default function PlayerLite() {
                 </div>
               )}
             </div>
-            <button onClick={toggleMute} title="静音">{muted || volume === 0 ? I.volOff : I.vol}</button>
+            <button className="ui-mute" onClick={toggleMute} title="静音">{muted || volume === 0 ? I.volOff : I.vol}</button>
             <input
               type="range"
               min={0}
