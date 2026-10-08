@@ -150,6 +150,7 @@ export default function PlayerLite() {
   const lastTapRef = useRef(0)
   const lastUiTickRef = useRef(0)
   const tapStartedVisibleRef = useRef(false)
+  const vDeadCountRef = useRef(0)
   // 方向锁定失败(部分安卓内核在全屏切换中会 cancel lock)→ CSS 旋转 90° 模拟横屏(B 站同款兜底)
   const [forceLandscape, setForceLandscape] = useState(false)
   const orientRetryRef = useRef<number[]>([])
@@ -437,10 +438,11 @@ export default function PlayerLite() {
     player.on(Events.TIME, () => {
       if (pausedRef.current) pausedRef.current = false
       try {
+        const nowMs = Date.now()
         const nowSec = Number(player.currentTime ?? 0) / 1000
         const lock = seekLockRef.current
         if (lock) {
-          if (Math.abs(nowSec - lock.target) <= 2.5 || Date.now() > lock.until) seekLockRef.current = null
+          if (Math.abs(nowSec - lock.target) <= 2.5 || nowMs > lock.until) seekLockRef.current = null
           else {
             // seek 追上之前,进度条与时间显示保持在目标位置(不回跳)
             setCur(lock.target)
@@ -455,8 +457,25 @@ export default function PlayerLite() {
             if (isMSE || Number(st?.videoRenderFramerate ?? 0) > 0) setGotFirstFrame(true)
           } catch { /* ignore */ }
         }
+        // seek 后视频防活:6 秒内 seek 过且渲染帧率持续为 0(≥1.6s)→ 软重载自愈
+        // (部分内核 wasm demuxer seek 后报 demux error -2 且不再恢复)
+        if (!pausedRef.current && nowMs - lastSeekDoneRef.current < 6000) {
+          let vDead = false
+          try {
+            const st = player.getStats?.()
+            vDead = Number(st?.videoRenderFramerate ?? 0) === 0
+          } catch { /* ignore */ }
+          vDeadCountRef.current = vDead ? vDeadCountRef.current + 1 : 0
+          if (vDeadCountRef.current >= 4) {
+            vDeadCountRef.current = 0
+            console.warn('[player] seek 后视频无渲染,软重载恢复')
+            void hardReload(Number(player.currentTime ?? 0) / 1000)
+            return
+          }
+        } else {
+          vDeadCountRef.current = 0
+        }
         // 节流:时间事件 ~4Hz,整树重渲染在低端手机上会引发控制栏闪烁,限到 ~2.5Hz
-        const nowMs = Date.now()
         if (nowMs - lastUiTickRef.current < 400) return
         lastUiTickRef.current = nowMs
         setCur(nowSec)
@@ -1002,6 +1021,13 @@ export default function PlayerLite() {
     ;[60, 300, 800, 1500].forEach((d) => {
       window.setTimeout(() => {
         try { window.dispatchEvent(new Event('resize')) } catch { /* ignore */ }
+        try {
+          // 直接调用内核 resize:全屏/旋转后按容器实时尺寸重算视频面(修复画面条)
+          const rect = surfaceRef.current?.getBoundingClientRect()
+          if (rect && rect.width > 0 && rect.height > 0) {
+            playerRef.current?.resize(Math.round(rect.width), Math.round(rect.height))
+          }
+        } catch { /* ignore */ }
       }, d)
     })
   }, [])
