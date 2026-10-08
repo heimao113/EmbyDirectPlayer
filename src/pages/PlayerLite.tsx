@@ -920,7 +920,7 @@ export default function PlayerLite() {
       return
     }
     so.lock('landscape')
-      .then(() => setForceLandscape(false))
+      .then(() => { setForceLandscape(false); kickResize() })
       .catch(() => {
         if (attempt >= 4) {
           setForceLandscape(true)
@@ -936,12 +936,23 @@ export default function PlayerLite() {
     orientRetryRef.current = []
   }, [])
 
+  // CSS 旋转/全屏切换不会自动触发 resize,内核(libmedia)会按旧尺寸摆视频面导致画面被拉扁;
+  // 在数百毫秒内多次补发 resize 强制重算
+  const kickResize = useCallback(() => {
+    ;[60, 300, 800, 1500].forEach((d) => {
+      window.setTimeout(() => {
+        try { window.dispatchEvent(new Event('resize')) } catch { /* ignore */ }
+      }, d)
+    })
+  }, [])
+
   const toggleFullscreen = useCallback(() => {
     const el = shellRef.current as (HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void }) | null
     try {
       if (document.fullscreenElement) {
         clearOrientRetry()
         setForceLandscape(false)
+        kickResize()
         try { (screen.orientation as ScreenOrientation & { unlock?: () => void }).unlock?.() } catch { /* ignore */ }
         void document.exitFullscreen().catch(() => {})
         return
@@ -955,6 +966,7 @@ export default function PlayerLite() {
       Promise.resolve(req()).then(() => {
         // 手机上进入全屏自动横屏;锁定失败自动降级 CSS 模拟横屏
         tryLockLandscape(0)
+        kickResize()
       }).catch((e: unknown) => {
         reportFatal('进入全屏失败: ' + String((e as Error)?.message ?? e))
         setForceLandscape(true)
@@ -962,7 +974,7 @@ export default function PlayerLite() {
     } catch (e) {
       reportFatal('全屏异常: ' + String((e as Error)?.message ?? e))
     }
-  }, [tryLockLandscape, clearOrientRetry])
+  }, [tryLockLandscape, clearOrientRetry, kickResize])
 
   const selectAudio = useCallback(async (id: number) => {
     const player = playerRef.current
@@ -1089,11 +1101,13 @@ export default function PlayerLite() {
     }
     document.addEventListener('fullscreenchange', onFsChange)
     window.addEventListener('resize', onResize)
+    const t = window.setTimeout(kickResize, 120)
     return () => {
+      window.clearTimeout(t)
       document.removeEventListener('fullscreenchange', onFsChange)
       window.removeEventListener('resize', onResize)
     }
-  }, [forceLandscape, clearOrientRetry])
+  }, [forceLandscape, clearOrientRetry, kickResize])
 
   // ---------- 键盘 ----------
   useEffect(() => {
