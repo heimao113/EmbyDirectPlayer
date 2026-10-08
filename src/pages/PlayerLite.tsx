@@ -489,8 +489,9 @@ export default function PlayerLite() {
       }) as never,
       enableWorker: globalThis.crossOriginIsolated === true,
       // 官方参数调优(参照 libmedia master 源码默认值):
-      // preLoadTime 默认 4s(内核预解码满 4s 帧才出画)——弱手机解满要 8s 墙钟,降到 2s 加快首帧
-      preLoadTime: coarsePointerRef.current ? 2 : 4,
+      // preLoadTime 默认 4s(内核预解码满 4s 帧才出画)——续播跳转/弱设备都要白等解码,
+      // 统一降到 2s:出画时间减半,起播缓冲 2s 对点播足够
+      preLoadTime: 2,
       // audioWorkletBufferLength 默认桌面 10/移动 20——官方注释:通信延迟大会音频卡顿,可调大。移动端提到 40
       audioWorkletBufferLength: coarsePointerRef.current ? 40 : 10,
       // 规格 §6.1 强制 wasm 软解:不用 MSE 通道。
