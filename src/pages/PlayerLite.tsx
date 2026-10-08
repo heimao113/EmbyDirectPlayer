@@ -868,6 +868,9 @@ export default function PlayerLite() {
       pendingSeekRef.current = target
     }
   }, [dur])
+  const seekBy = useCallback((delta: number) => {
+    commitSeek(Math.max(0, Math.min(dur || 1e9, cur + delta)))
+  }, [commitSeek, cur, dur])
 
   const seekTo = useCallback((sec: number) => {
     commitSeek(sec)
@@ -1109,6 +1112,28 @@ export default function PlayerLite() {
     }
   }, [forceLandscape, clearOrientRetry, kickResize])
 
+  // ---------- 手机:全屏往返后内核的视频面/字幕层/音轨状态易错乱,退出全屏时软重载恢复 ----------
+  const fsReloadTimerRef = useRef<number | undefined>(undefined)
+  useEffect(() => {
+    if (!coarsePointerRef.current) return
+    const onFsChange = () => {
+      if (document.fullscreenElement) return
+      // 等退出过渡落定后软重载:自动重挂字幕/音轨并回到当前进度
+      if (fsReloadTimerRef.current) window.clearTimeout(fsReloadTimerRef.current)
+      fsReloadTimerRef.current = window.setTimeout(() => {
+        const player = playerRef.current
+        if (!player || !startedRef.current) return
+        const sec = Number(player.currentTime ?? 0) / 1000
+        void hardReload(sec)
+      }, 400)
+    }
+    document.addEventListener('fullscreenchange', onFsChange)
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange)
+      if (fsReloadTimerRef.current) window.clearTimeout(fsReloadTimerRef.current)
+    }
+  }, [hardReload])
+
   // ---------- 键盘 ----------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1221,6 +1246,8 @@ export default function PlayerLite() {
           </div>
           <div className="ui-buttons">
             <button onClick={togglePlay} title={paused ? '播放' : '暂停'}>{paused ? '▶' : '⏸'}</button>
+            <button onClick={() => seekBy(-10)} title="快退 10 秒">⏪</button>
+            <button onClick={() => seekBy(10)} title="快进 10 秒">⏩</button>
             <span className="ui-time">{fmt(cur)} / {fmt(dur)}</span>
             <div className="ui-flex" />
             <button onClick={toggleSub} title="字幕" className={subOn ? 'ui-on' : 'ui-off'}>字</button>
