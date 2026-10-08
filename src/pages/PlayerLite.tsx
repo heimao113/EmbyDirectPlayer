@@ -774,9 +774,12 @@ export default function PlayerLite() {
 
   // ---------- 看门狗:视频/音频停滞 ----------
   // 重载恢复:load 会清掉外挂字幕,必须重新挂载,否则字幕退回内嵌渲染(样式/对位与主链路不一致)
+  const reloadingRef = useRef(false)
   const hardReload = useCallback(async (atSec: number) => {
     const player = playerRef.current
     if (!player || !srcRef.current) return
+    if (reloadingRef.current) return
+    reloadingRef.current = true
     setStage('正在恢复播放…')
     try {
       await player.load(srcRef.current.url, { ext: srcRef.current.ext } as never)
@@ -785,7 +788,9 @@ export default function PlayerLite() {
       }
       if (atSec > 0) void player.seek(BigInt(Math.round(atSec * 1000))).catch(() => {})
       void player.play().catch(() => {})
-    } catch { /* 失败则等下个周期再试 */ }
+    } catch { /* 失败则等下个周期再试 */ } finally {
+      reloadingRef.current = false
+    }
   }, [])
 
   useEffect(() => {
@@ -815,6 +820,8 @@ export default function PlayerLite() {
       const inGrace = now - readyAtRef.current < 20_000
       if (hasAudio && stats) {
         const alive = Number(stats.audioRenderFramerate ?? 0) > 0 || Number(stats.audioDecodeFramerate ?? 0) > 0
+        // seek 后音频更容易掉线:近 6 秒内有过 seek 时,判定加快且不受启动宽限限制
+        const seekBoost = now - lastSeekDoneRef.current < 6000
         if (alive) {
           audio.count = 0
         } else {
@@ -822,7 +829,7 @@ export default function PlayerLite() {
           if (audio.count === 4) {
             console.warn('[player] 音频渲染停滞,play() 恢复')
             void player.play().catch(() => {})
-          } else if (audio.count >= 8 && !inGrace && now - audio.lastAt > 60_000) {
+          } else if (audio.count >= (seekBoost ? 3 : 8) && (!inGrace || seekBoost) && now - audio.lastAt > 60_000) {
             audio.count = 0
             audio.lastAt = now
             console.warn(`[player] 音频恢复无效,重载 @ ${sec.toFixed(1)}s`)
@@ -850,23 +857,42 @@ export default function PlayerLite() {
     }
   }, [])
 
+  const seekCoalesceRef = useRef<{ at: number; timer?: number }>({ at: 0 })
+  const lastSeekDoneRef = useRef(0)
   const commitSeek = useCallback((targetSec: number) => {
-    const player = playerRef.current
-    if (!player) return
     const target = Math.max(0, Math.min(targetSec, dur || targetSec))
     seekLockRef.current = { target, until: Date.now() + 6000 }
     setCur(target)
-    try {
-      // demux 流未就绪(刚加载/加载中)时 seek 会崩 → 转为 LOADED 后应用的待执行 seek
-      const ready = ((player.getStreams?.() ?? []) as unknown as Array<unknown>).length > 0
-      if (!ready) {
+    const doSeek = () => {
+      const player = playerRef.current
+      if (!player) return
+      try {
+        // demux 流未就绪(刚加载/加载中)时 seek 会崩 → 转为 LOADED 后应用的待执行 seek
+        const ready = ((player.getStreams?.() ?? []) as unknown as Array<unknown>).length > 0
+        if (!ready) {
+          pendingSeekRef.current = target
+          return
+        }
+        lastSeekDoneRef.current = Date.now()
+        void player.seek(BigInt(Math.round(target * 1000))).catch(() => {})
+      } catch {
         pendingSeekRef.current = target
-        return
       }
-      void player.seek(BigInt(Math.round(target * 1000))).catch(() => {})
-    } catch {
-      pendingSeekRef.current = target
     }
+    // 连击合并:350ms 内的连续 seek(双击快进/键盘连按/拖动)只执行最后一次,
+    // 高频 seek 会把 wasm 解码器打进出错状态(音轨掉/字幕乱)
+    const now = Date.now()
+    if (now - seekCoalesceRef.current.at < 350) {
+      seekCoalesceRef.current.at = now
+      if (seekCoalesceRef.current.timer) window.clearTimeout(seekCoalesceRef.current.timer)
+      seekCoalesceRef.current.timer = window.setTimeout(() => {
+        seekCoalesceRef.current.at = Date.now()
+        doSeek()
+      }, 300)
+      return
+    }
+    seekCoalesceRef.current.at = now
+    doSeek()
   }, [dur])
   const seekBy = useCallback((delta: number) => {
     commitSeek(Math.max(0, Math.min(dur || 1e9, cur + delta)))
@@ -970,6 +996,14 @@ export default function PlayerLite() {
         // 手机上进入全屏自动横屏;锁定失败自动降级 CSS 模拟横屏
         tryLockLandscape(0)
         kickResize()
+        // 手机:全屏切换后内核字幕层/音轨易错乱,落定后软重载回当前进度(与退全屏对称)
+        if (coarsePointerRef.current) {
+          window.setTimeout(() => {
+            const p = playerRef.current
+            if (!p || !startedRef.current) return
+            void hardReload(Number(p.currentTime ?? 0) / 1000)
+          }, 700)
+        }
       }).catch((e: unknown) => {
         reportFatal('进入全屏失败: ' + String((e as Error)?.message ?? e))
         setForceLandscape(true)
@@ -977,7 +1011,7 @@ export default function PlayerLite() {
     } catch (e) {
       reportFatal('全屏异常: ' + String((e as Error)?.message ?? e))
     }
-  }, [tryLockLandscape, clearOrientRetry, kickResize])
+  }, [tryLockLandscape, clearOrientRetry, kickResize, hardReload])
 
   const selectAudio = useCallback(async (id: number) => {
     const player = playerRef.current
