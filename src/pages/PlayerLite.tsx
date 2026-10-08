@@ -45,8 +45,9 @@ const I = {
   ),
   fwd10: (
     <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
-      <path d="M18.41 7.61 17 6.2A7.93 7.93 0 0 1 18.99 12c0 3.31-2.69 6-6 6v-4l-5 5 5 5v-4c4.42 0 8-3.58 8-8a7.93 7.93 0 0 0-2.58-5.39z" transform="translate(-1 0)" />
-      <path d="M12.01 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6 0 1.01.25 1.97.7 2.8l-1.46 1.46A7.93 7.93 0 0 1 4.01 13c0-4.42 3.58-8 8-8z" transform="translate(1 0)" />
+      <g transform="translate(24 0) scale(-1 1)">
+        <path d="M11.99 5V1l-5 5 5 5v-4c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 19.99 13c0-4.42-3.58-8-8-8zm-7 1.2L3.58 7.61A7.93 7.93 0 0 0 1.99 13c0 4.42 3.58 8 8 8v-2c-3.31 0-6-2.69-6-6 0-1.78.78-3.38 2.02-4.47z" />
+      </g>
       <text x="12" y="15.5" textAnchor="middle" fontSize="8.5" fontWeight="700" fill="currentColor" stroke="none">10</text>
     </svg>
   ),
@@ -737,7 +738,7 @@ export default function PlayerLite() {
 
         if (canDirect) {
           const pos = (it.UserData?.PlaybackPositionTicks ?? 0) / 10_000_000
-          pendingSeekRef.current = pos > 30 ? pos - 0.75 : 0
+          pendingSeekRef.current = pos > 10 ? pos - 0.75 : 0
           setBadge('直连')
           setSrc({
             // 不带媒体扩展名:避开手机浏览器"媒体嗅探"弹出下载面板(嗅探器按 .mp4/.mkv 后缀抓)
