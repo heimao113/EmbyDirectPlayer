@@ -29,6 +29,29 @@ import { mapUint8Array } from '@libmedia/cheap'
 
 const WASM_BASE = new URL(import.meta.env.BASE_URL, location.href).href
 
+/** 错误浮层:vanilla DOM 直挂 body,React 树崩溃也能显示;msg 前缀区分来源 */
+function reportFatal(msg: string) {
+  try {
+    let box = document.getElementById('ewp-fatal')
+    if (!box) {
+      box = document.createElement('div')
+      box.id = 'ewp-fatal'
+      box.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;background:rgba(40,10,16,0.94);color:#ffb4c4;border:1px solid rgba(255,107,157,0.4);border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.5;word-break:break-all;max-height:40vh;overflow:auto'
+      const copy = document.createElement('button')
+      copy.textContent = '复制错误'
+      copy.style.cssText = 'margin-top:6px;padding:4px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.25);background:transparent;color:#fff;font-size:12px'
+      copy.onclick = () => { navigator.clipboard?.writeText(box?.dataset.msg ?? msg).catch(() => {}) }
+      box.appendChild(copy)
+      document.body.appendChild(box)
+    }
+    box.dataset.msg = msg
+    const text = document.createElement('div')
+    text.textContent = msg
+    box.insertBefore(text, box.firstChild)
+    while (box.children.length > 7) box.removeChild(box.children[box.children.length - 2])
+  } catch { /* ignore */ }
+}
+
 /** 官方示例同款:getWasm 按 codecId 返回自托管解码器 */
 function getWasm(type: 'decoder' | 'resampler' | 'stretchpitcher', codecId?: number): string {
   const v = 'simd'
@@ -114,6 +137,7 @@ export default function PlayerLite() {
   const coarsePointerRef = useRef(typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches)
   const lastTapRef = useRef(0)
   const lastUiTickRef = useRef(0)
+  const tapStartedVisibleRef = useRef(false)
   const [seekFlash, setSeekFlash] = useState<{ side: 'l' | 'r' } | null>(null)
   const flashTimerRef = useRef<number | undefined>(undefined)
   const flashSeek = useCallback((side: 'l' | 'r') => {
@@ -332,26 +356,7 @@ export default function PlayerLite() {
 
   // ---------- 全局崩溃捕获:手机浏览器上渲染/解码异常时把原因直接显示在页面上 ----------
   useEffect(() => {
-    const show = (msg: string) => {
-      try {
-        let box = document.getElementById('ewp-fatal')
-        if (!box) {
-          box = document.createElement('div')
-          box.id = 'ewp-fatal'
-          box.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;background:rgba(40,10,16,0.94);color:#ffb4c4;border:1px solid rgba(255,107,157,0.4);border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.5;word-break:break-all;max-height:40vh;overflow:auto'
-          const copy = document.createElement('button')
-          copy.textContent = '复制错误'
-          copy.style.cssText = 'margin-top:6px;padding:4px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.25);background:transparent;color:#fff;font-size:12px'
-          copy.onclick = () => { navigator.clipboard?.writeText(box?.dataset.msg ?? msg).catch(() => {}) }
-          box.appendChild(copy)
-          document.body.appendChild(box)
-        }
-        box.dataset.msg = msg
-        const text = document.createElement('div')
-        text.textContent = msg
-        box.insertBefore(text, box.firstChild)
-      } catch { /* ignore */ }
-    }
+    const show = (msg: string) => reportFatal(msg)
     // 这些是播放内核的良性噪音(初始化竞态/自动播放策略中断),不影响播放,不展示
     const BENIGN = [
       'player status is not loaded',
@@ -405,25 +410,7 @@ export default function PlayerLite() {
       const e = args[1] ?? args[0]
       const msg = String((e as { message?: string })?.message ?? e).slice(0, 300)
       console.error('[player] libmedia ERROR', args)
-      try {
-        let box = document.getElementById('ewp-fatal')
-        if (!box) {
-          box = document.createElement('div')
-          box.id = 'ewp-fatal'
-          box.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;background:rgba(40,10,16,0.94);color:#ffb4c4;border:1px solid rgba(255,107,157,0.4);border-radius:10px;padding:10px 12px;font-size:12px;line-height:1.5;word-break:break-all;max-height:40vh;overflow:auto'
-          const copy = document.createElement('button')
-          copy.textContent = '复制错误'
-          copy.style.cssText = 'margin-top:6px;padding:4px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.25);background:transparent;color:#fff;font-size:12px'
-          copy.onclick = () => { navigator.clipboard?.writeText(box?.dataset.msg ?? msg).catch(() => {}) }
-          box.appendChild(copy)
-          document.body.appendChild(box)
-        }
-        box.dataset.msg = msg
-        const text = document.createElement('div')
-        text.textContent = '内核: ' + msg
-        box.insertBefore(text, box.firstChild)
-        while (box.children.length > 5) box.removeChild(box.children[box.children.length - 2])
-      } catch { /* ignore */ }
+      reportFatal('内核: ' + msg)
     })
     player.on(Events.PAUSED, () => { pausedRef.current = true; setPaused(true) })
     player.on(Events.PLAYED, () => { pausedRef.current = false; setPaused(false) })
@@ -922,17 +909,31 @@ export default function PlayerLite() {
   }, [subOn])
 
   const toggleFullscreen = useCallback(() => {
-    if (document.fullscreenElement) {
-      try { (screen.orientation as ScreenOrientation & { unlock?: () => void }).unlock?.() } catch { /* ignore */ }
-      void document.exitFullscreen().catch(() => {})
-    } else {
-      void shellRef.current
-        ?.requestFullscreen?.()
-        ?.then(() => {
-          // 手机上进入全屏自动横屏(需要全屏态才允许锁定)
-          try { void (screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }).lock?.('landscape') } catch { /* ignore */ }
-        })
-        .catch(() => {})
+    const el = shellRef.current as (HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void }) | null
+    try {
+      if (document.fullscreenElement) {
+        try { (screen.orientation as ScreenOrientation & { unlock?: () => void }).unlock?.() } catch { /* ignore */ }
+        void document.exitFullscreen().catch(() => {})
+        return
+      }
+      const req = el?.requestFullscreen?.bind(el) ?? el?.webkitRequestFullscreen?.bind(el)
+      if (!req) {
+        reportFatal('当前浏览器不支持网页全屏 API,请改用 Chrome')
+        return
+      }
+      Promise.resolve(req()).then(() => {
+        const so = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }
+        if (so?.lock) {
+          // 手机上进入全屏自动横屏(必须处于全屏态才允许锁定)
+          so.lock('landscape').catch((e: unknown) => {
+            reportFatal('方向锁定失败(画面不会自动转横屏): ' + String((e as Error)?.message ?? e))
+          })
+        }
+      }).catch((e: unknown) => {
+        reportFatal('进入全屏失败: ' + String((e as Error)?.message ?? e))
+      })
+    } catch (e) {
+      reportFatal('全屏异常: ' + String((e as Error)?.message ?? e))
     }
   }, [])
 
@@ -963,16 +964,17 @@ export default function PlayerLite() {
     }
     wake()
     const el = shellRef.current
+    const coarseDev = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches
     const onMove = () => wake()
     const onTouch = (e: TouchEvent) => {
       // 触屏:点到控制栏/顶栏才保持显示;点视频区由 surface onClick 接管显隐
       const t = e.target as HTMLElement | null
       if (t?.closest('.ui-controls, .ui-top')) wake()
     }
-    el?.addEventListener('mousemove', onMove)
+    if (!coarseDev) el?.addEventListener('mousemove', onMove)
     el?.addEventListener('touchstart', onTouch, { passive: true })
     return () => {
-      el?.removeEventListener('mousemove', onMove)
+      if (!coarseDev) el?.removeEventListener('mousemove', onMove)
       el?.removeEventListener('touchstart', onTouch)
       if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current)
     }
@@ -1095,6 +1097,11 @@ export default function PlayerLite() {
       <div
         className="ui-surface"
         ref={surfaceRef}
+        onTouchStart={() => {
+          // 记录按下瞬间控制栏的可见性:touchstart 先于浏览器补发的合成 mousemove/click,
+          // 以此为准就不会被"先唤醒再取反"搞成闪现
+          tapStartedVisibleRef.current = showControls
+        }}
         onClick={(e) => {
           // 触屏:单击呼出/隐藏控制栏;双击分区 —— 左 40% 快退 10s,右 40% 快进 10s,中间播放/暂停(B 站交互)
           if (coarsePointerRef.current) {
@@ -1116,11 +1123,13 @@ export default function PlayerLite() {
               }
             } else {
               lastTapRef.current = now
-              setShowControls((v) => {
-                if (!v) armHide()
-                else if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current)
-                return !v
-              })
+              if (tapStartedVisibleRef.current) {
+                if (hideTimerRef.current) window.clearTimeout(hideTimerRef.current)
+                setShowControls(false)
+              } else {
+                setShowControls(true)
+                armHide()
+              }
             }
           } else {
             togglePlay()

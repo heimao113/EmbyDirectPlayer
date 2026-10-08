@@ -1610,3 +1610,7 @@ canvas.JASSUB { pointer-events: none !important; }
   animation: ewp-flash 0.62s ease forwards;
 }
 @keyframes ewp-flash { from { opacity: 1; } to { opacity: 0; } }
+
+/* ===== 全屏态 ===== */
+.ui-player-page:fullscreen { width: 100vw; height: 100vh; }
+.ui-player-page:-webkit-full-screen { width: 100vw; height: 100vh; }
