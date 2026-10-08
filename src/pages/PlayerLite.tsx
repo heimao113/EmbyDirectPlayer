@@ -54,30 +54,42 @@ function reportFatal(msg: string) {
 
 /** 官方示例同款:getWasm 按 codecId 返回自托管解码器 */
 function getWasm(type: 'decoder' | 'resampler' | 'stretchpitcher', codecId?: number): string {
-  const v = 'simd'
+  const v = WASM_SIMD ? 'simd' : ''
+  const suffix = v ? `-${v}` : ''
   const d = `${WASM_BASE}wasm/decode/`
   if (type === 'decoder' && codecId !== undefined) {
     const map: Record<number, string> = {
-      [AVCodecID.AV_CODEC_ID_AAC]: `${d}aac-${v}.wasm`,
-      [AVCodecID.AV_CODEC_ID_MP3]: `${d}mp3-${v}.wasm`,
-      [AVCodecID.AV_CODEC_ID_FLAC]: `${d}flac-${v}.wasm`,
-      [AVCodecID.AV_CODEC_ID_AC3]: `${d}ac3-${v}.wasm`,
-      [AVCodecID.AV_CODEC_ID_EAC3]: `${d}eac3-${v}.wasm`,
-      [AVCodecID.AV_CODEC_ID_DTS]: `${d}dca-${v}.wasm`,
-      [AVCodecID.AV_CODEC_ID_H264]: `${d}h264-${v}.wasm`,
-      [AVCodecID.AV_CODEC_ID_HEVC]: `${d}hevc-${v}.wasm`,
-      [AVCodecID.AV_CODEC_ID_AV1]: `${d}av1-${v}.wasm`,
-      [AVCodecID.AV_CODEC_ID_VP8]: `${d}vp8-${v}.wasm`,
-      [AVCodecID.AV_CODEC_ID_VP9]: `${d}vp9-${v}.wasm`,
-      [AVCodecID.AV_CODEC_ID_MPEG2VIDEO]: `${d}mpeg2video-${v}.wasm`,
-      [AVCodecID.AV_CODEC_ID_MPEG4]: `${d}mpeg4-${v}.wasm`,
+      [AVCodecID.AV_CODEC_ID_AAC]: `${d}aac${suffix}.wasm`,
+      [AVCodecID.AV_CODEC_ID_MP3]: `${d}mp3${suffix}.wasm`,
+      [AVCodecID.AV_CODEC_ID_FLAC]: `${d}flac${suffix}.wasm`,
+      [AVCodecID.AV_CODEC_ID_AC3]: `${d}ac3${suffix}.wasm`,
+      [AVCodecID.AV_CODEC_ID_EAC3]: `${d}eac3${suffix}.wasm`,
+      [AVCodecID.AV_CODEC_ID_DTS]: `${d}dca${suffix}.wasm`,
+      [AVCodecID.AV_CODEC_ID_H264]: `${d}h264${suffix}.wasm`,
+      [AVCodecID.AV_CODEC_ID_HEVC]: `${d}hevc${suffix}.wasm`,
+      [AVCodecID.AV_CODEC_ID_AV1]: `${d}av1${suffix}.wasm`,
+      [AVCodecID.AV_CODEC_ID_VP8]: `${d}vp8${suffix}.wasm`,
+      [AVCodecID.AV_CODEC_ID_VP9]: `${d}vp9${suffix}.wasm`,
+      [AVCodecID.AV_CODEC_ID_MPEG2VIDEO]: `${d}mpeg2video${suffix}.wasm`,
+      [AVCodecID.AV_CODEC_ID_MPEG4]: `${d}mpeg4${suffix}.wasm`,
     }
     if (map[codecId]) return map[codecId]
   }
-  if (type === 'resampler') return `${WASM_BASE}wasm/resample/resample-${v}.wasm`
-  if (type === 'stretchpitcher') return `${WASM_BASE}wasm/stretchpitch/stretchpitch-${v}.wasm`
-  return `${d}aac-${v}.wasm`
+  if (type === 'resampler') return `${WASM_BASE}wasm/resample/resample${suffix}.wasm`
+  if (type === 'stretchpitcher') return `${WASM_BASE}wasm/stretchpitch/stretchpitch${suffix}.wasm`
+  return `${d}aac${suffix}.wasm`
 }
+
+/** WASM SIMD 能力检测(官方标准字节序列):不支持的内核(部分国产手机浏览器)退回普通版解码器 */
+const WASM_SIMD = (() => {
+  try {
+    return WebAssembly.validate(
+      new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0, 1, 5, 1, 96, 0, 1, 123, 3, 2, 1, 0, 10, 10, 1, 8, 0, 65, 0, 253, 15, 253, 98, 11]),
+    )
+  } catch {
+    return false
+  }
+})()
 
 /** 各声道数的标准布局掩码(ffmpeg av_channel_layout_default 同款) */
 const CHANNEL_DEFAULT_MASK: Record<number, bigint> = {
