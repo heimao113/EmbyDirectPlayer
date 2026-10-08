@@ -1627,3 +1627,17 @@ canvas.JASSUB { pointer-events: none !important; }
   border-radius: 0;
   z-index: 99990;
 }
+
+/* ===== 软解启动提示 ===== */
+.ui-warmup {
+  position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%);
+  display: flex; align-items: center; gap: 10px;
+  background: rgba(0,0,0,0.55); padding: 10px 16px; border-radius: 999px;
+  color: #cfd3da; font-size: 12.5px; z-index: 12; pointer-events: none;
+  white-space: nowrap;
+}
+.ui-warmup::before {
+  content: ''; width: 14px; height: 14px; border-radius: 999px; flex-shrink: 0;
+  border: 2px solid rgba(255,255,255,0.25); border-top-color: var(--accent-2);
+  animation: ewp-spin 0.9s linear infinite;
+}

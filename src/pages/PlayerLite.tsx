@@ -153,6 +153,7 @@ export default function PlayerLite() {
   // 方向锁定失败(部分安卓内核在全屏切换中会 cancel lock)→ CSS 旋转 90° 模拟横屏(B 站同款兜底)
   const [forceLandscape, setForceLandscape] = useState(false)
   const orientRetryRef = useRef<number[]>([])
+  const [gotFirstFrame, setGotFirstFrame] = useState(false)
   const [seekFlash, setSeekFlash] = useState<{ side: 'l' | 'r' } | null>(null)
   const flashTimerRef = useRef<number | undefined>(undefined)
   const flashSeek = useCallback((side: 'l' | 'r') => {
@@ -442,6 +443,14 @@ export default function PlayerLite() {
             return
           }
         }
+        // 首帧检测:MSE 由浏览器解码(立即算出帧);wasm 软解等渲染帧率 >0 才算出画
+        if (!gotFirstFrame) {
+          try {
+            const st = player.getStats?.()
+            const isMSE = !!surfaceRef.current?.querySelector('video')
+            if (isMSE || Number(st?.videoRenderFramerate ?? 0) > 0) setGotFirstFrame(true)
+          } catch { /* ignore */ }
+        }
         // 节流:时间事件 ~4Hz,整树重渲染在低端手机上会引发控制栏闪烁,限到 ~2.5Hz
         const nowMs = Date.now()
         if (nowMs - lastUiTickRef.current < 400) return
@@ -470,7 +479,7 @@ export default function PlayerLite() {
         } catch { navigate(-1) }
       })()
     })
-  }, [api, itemId, item, navigate])
+  }, [api, itemId, item, navigate, gotFirstFrame])
 
   // ---------- 初始化:媒体信息 + 播放决策 ----------
   useEffect(() => {
@@ -792,6 +801,7 @@ export default function PlayerLite() {
     if (!player || !srcRef.current) return
     if (reloadingRef.current) return
     reloadingRef.current = true
+    setGotFirstFrame(false)
     setStage('正在恢复播放…')
     try {
       await player.load(srcRef.current.url, { ext: srcRef.current.ext } as never)
@@ -878,6 +888,11 @@ export default function PlayerLite() {
     const doSeek = () => {
       const player = playerRef.current
       if (!player) return
+      // 软重载进行中:worker 正在重建,seek 转为待执行
+      if (reloadingRef.current) {
+        pendingSeekRef.current = target
+        return
+      }
       try {
         // demux 流未就绪(刚加载/加载中)时 seek 会崩 → 转为 LOADED 后应用的待执行 seek
         const ready = ((player.getStreams?.() ?? []) as unknown as Array<unknown>).length > 0
@@ -1006,16 +1021,9 @@ export default function PlayerLite() {
       }
       Promise.resolve(req()).then(() => {
         // 手机上进入全屏自动横屏;锁定失败自动降级 CSS 模拟横屏
+        // 注意:进全屏不做软重载——会和内核自身全屏 resize 处理撞车(worker 已销毁仍被 postMessage)
         tryLockLandscape(0)
         kickResize()
-        // 手机:全屏切换后内核字幕层/音轨易错乱,落定后软重载回当前进度(与退全屏对称)
-        if (coarsePointerRef.current) {
-          window.setTimeout(() => {
-            const p = playerRef.current
-            if (!p || !startedRef.current) return
-            void hardReload(Number(p.currentTime ?? 0) / 1000)
-          }, 700)
-        }
       }).catch((e: unknown) => {
         reportFatal('进入全屏失败: ' + String((e as Error)?.message ?? e))
         setForceLandscape(true)
@@ -1023,7 +1031,7 @@ export default function PlayerLite() {
     } catch (e) {
       reportFatal('全屏异常: ' + String((e as Error)?.message ?? e))
     }
-  }, [tryLockLandscape, clearOrientRetry, kickResize, hardReload])
+  }, [tryLockLandscape, clearOrientRetry, kickResize])
 
   const selectAudio = useCallback(async (id: number) => {
     const player = playerRef.current
@@ -1349,6 +1357,9 @@ export default function PlayerLite() {
             <button onClick={toggleFullscreen} title="全屏">⛶</button>
           </div>
         </div>
+      )}
+      {status === 'ready' && startedRef.current && !gotFirstFrame && !paused && (
+        <div className="ui-warmup">软解启动中,首次出画面可能需要几秒…</div>
       )}
       {seekFlash && (
         <div
