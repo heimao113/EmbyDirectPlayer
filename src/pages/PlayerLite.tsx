@@ -587,8 +587,9 @@ export default function PlayerLite() {
       window.setTimeout(() => {
         const p = playerRef.current
         if (!p || reloadingRef.current) return
+        // 注意:暂停中也要校验——刷新后可能因音频上下文挂起被主动暂停,
+        // 此时若初始 seek 静默失败,必须把位置纠正回来,否则用户恢复声音后从头播/字幕错位
         if (seekLockRef.current || Date.now() - lastSeekDoneRef.current < 2500) return
-        if (pausedRef.current) return
         const nowSec = Number(p.currentTime ?? 0) / 1000
         if (Math.abs(nowSec - target) > 3) {
           console.warn(`[resume] 续播未生效(${nowSec.toFixed(1)}s ≠ ${target.toFixed(1)}s),重新 seek`)
