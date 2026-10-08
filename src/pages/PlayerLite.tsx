@@ -364,6 +364,10 @@ export default function PlayerLite() {
         return pool[0]
       }) as never,
       enableWorker: globalThis.crossOriginIsolated === true,
+      // 规格 §6.1 强制 wasm 软解:不用 MSE 通道。
+      // 弱内核(部分安卓浏览器)的 MSE worker 会被系统掐死,残留 postMessage 调用直接崩;
+      // wasm + canvas + WebAudio 全程自渲染,状态自洽,移动端确定性最好
+      checkUseMSE: () => false,
     } as never)
     playerRef.current = player
     ;(window as unknown as Record<string, unknown>).__litePlayer = player
@@ -1323,7 +1327,7 @@ export default function PlayerLite() {
               <button onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === 'speed' ? null : 'speed') }} title="倍速">倍速{rate !== 1 ? ` ${rate}×` : ''}</button>
               {openMenu === 'speed' && (
                 <div className="ui-menu" onClick={(e) => e.stopPropagation()}>
-                  {[0.5, 0.75, 1, 1.25, 1.5, 2].map((r) => (
+                  {[0.5, 0.75, 1, 1.25, 1.5, 2, 3].map((r) => (
                     <button key={r} className={`ui-menu-item ${rate === r ? 'ui-on' : ''}`} onClick={() => { changeRate(r); setOpenMenu(null) }}>
                       {r}×{rate === r ? ' ✓' : ''}
                     </button>
