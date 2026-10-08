@@ -29,6 +29,38 @@ import { mapUint8Array } from '@libmedia/cheap'
 
 const WASM_BASE = new URL(import.meta.env.BASE_URL, location.href).href
 
+/** 控制栏 SVG 图标(B 站风格线性,替代字符/emoji,跨平台渲染一致) */
+const I = {
+  play: (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.14v13.72c0 .8.87 1.3 1.56.88l10.5-6.86a1.05 1.05 0 0 0 0-1.76L9.56 4.26A1.04 1.04 0 0 0 8 5.14z" /></svg>
+  ),
+  pause: (
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z" /></svg>
+  ),
+  back10: (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M11.99 5V1l-5 5 5 5v-4c3.31 0 6 2.69 6 6 0 1.01-.25 1.97-.7 2.8l1.46 1.46A7.93 7.93 0 0 0 19.99 13c0-4.42-3.58-8-8-8zm-7 1.2L3.58 7.61A7.93 7.93 0 0 0 1.99 13c0 4.42 3.58 8 8 8v-2c-3.31 0-6-2.69-6-6 0-1.78.78-3.38 2.02-4.47z" />
+      <text x="12" y="15.5" textAnchor="middle" fontSize="8.5" fontWeight="700" fill="currentColor" stroke="none">10</text>
+    </svg>
+  ),
+  fwd10: (
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
+      <path d="M18.41 7.61 17 6.2A7.93 7.93 0 0 1 18.99 12c0 3.31-2.69 6-6 6v-4l-5 5 5 5v-4c4.42 0 8-3.58 8-8a7.93 7.93 0 0 0-2.58-5.39z" transform="translate(-1 0)" />
+      <path d="M12.01 5V1l5 5-5 5V7c-3.31 0-6 2.69-6 6 0 1.01.25 1.97.7 2.8l-1.46 1.46A7.93 7.93 0 0 1 4.01 13c0-4.42 3.58-8 8-8z" transform="translate(1 0)" />
+      <text x="12" y="15.5" textAnchor="middle" fontSize="8.5" fontWeight="700" fill="currentColor" stroke="none">10</text>
+    </svg>
+  ),
+  vol: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z" /></svg>
+  ),
+  volOff: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51A8.8 8.8 0 0 0 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3 3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06a8.99 8.99 0 0 0 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4 9.91 6.09 12 8.18V4z" /></svg>
+  ),
+  fs: (
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z" /></svg>
+  ),
+}
+
 /** 错误浮层:vanilla DOM 直挂 body,React 树崩溃也能显示;msg 前缀区分来源 */
 function reportFatal(msg: string) {
   try {
@@ -1492,9 +1524,9 @@ export default function PlayerLite() {
             />
           </div>
           <div className="ui-buttons">
-            <button onClick={togglePlay} title={paused ? '播放' : '暂停'}>{paused ? '▶' : '⏸'}</button>
-            <button onClick={() => seekBy(-10)} title="快退 10 秒">⏪</button>
-            <button onClick={() => seekBy(10)} title="快进 10 秒">⏩</button>
+            <button onClick={togglePlay} title={paused ? '播放' : '暂停'}>{paused ? I.play : I.pause}</button>
+            <button onClick={() => seekBy(-10)} title="快退 10 秒">{I.back10}</button>
+            <button onClick={() => seekBy(10)} title="快进 10 秒">{I.fwd10}</button>
             <span className="ui-time">{fmt(cur)} / {fmt(dur)}</span>
             <div className="ui-flex" />
             {subMenuTracks.length > 0 ? (
@@ -1552,7 +1584,7 @@ export default function PlayerLite() {
                 </div>
               )}
             </div>
-            <button onClick={toggleMute} title="静音">{muted || volume === 0 ? '🔇' : '🔊'}</button>
+            <button onClick={toggleMute} title="静音">{muted || volume === 0 ? I.volOff : I.vol}</button>
             <input
               type="range"
               min={0}
@@ -1575,7 +1607,7 @@ export default function PlayerLite() {
                 </div>
               )}
             </div>
-            <button onClick={toggleFullscreen} title="全屏">⛶</button>
+            <button onClick={toggleFullscreen} title="全屏">{I.fs}</button>
           </div>
         </div>
       )}
