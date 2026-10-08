@@ -142,8 +142,8 @@ export default function PlayerLite() {
   const audioReloadRef = useRef({ count: 0, lastAt: 0 })
   const hintRef = useRef<number | undefined>(undefined)
   const srcRef = useRef<SrcInfo | null>(null)
-  const extSubsPRef = useRef<Promise<Array<{ source: File; lang?: string; title?: string }>> | null>(null)
-  const extSubsLoadedRef = useRef<Array<{ source: File; lang?: string; title?: string }>>([])
+  const extSubsPRef = useRef<Promise<Array<{ source: File; lang?: string; title?: string; embyIndex: number }>> | null>(null)
+  const extSubsLoadedRef = useRef<Array<{ source: File; lang?: string; title?: string; embyIndex: number }>>([])
   const readyAtRef = useRef(0)
   // 触屏设备:视频区单击 = 呼出控制栏(桌面单击 = 暂停)
   const coarsePointerRef = useRef(typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches)
@@ -187,8 +187,13 @@ export default function PlayerLite() {
   const [muted, setMuted] = useState(false)
   const [rate, setRate] = useState(1)
   const [subOn, setSubOn] = useState(true)
+  // 字幕轨选择(UHD 式):全部文本轨列出由用户挑选
+  const [subMenuTracks, setSubMenuTracks] = useState<Array<{ embyIndex: number; label: string }>>([])
+  const [selectedSubEmby, setSelectedSubEmby] = useState<number | null>(null)
+  const preferredSubEmbyRef = useRef(0)
+  const extSubStreamIdOfRef = useRef<Map<number, number>>(new Map())
   const [showControls, setShowControls] = useState(true)
-  const [openMenu, setOpenMenu] = useState<'audio' | 'speed' | null>(null)
+  const [openMenu, setOpenMenu] = useState<'audio' | 'speed' | 'sub' | null>(null)
   const [audioTracks, setAudioTracks] = useState<Array<{ id: number; label: string }>>([])
   const [selectedAudioId, setSelectedAudioId] = useState(-1)
   // 播放链路统计(打开后长久保活,seek/拖动不影响)
@@ -290,10 +295,10 @@ export default function PlayerLite() {
   }, [status])
 
   // ---------- 字幕准备:Emby 文本字幕 → 官方 externalSubtitles ----------
-  const prepareExternalSubs = useCallback(async (): Promise<Array<{ source: File; lang?: string; title?: string }>> => {
+  const prepareExternalSubs = useCallback(async (): Promise<Array<{ source: File; lang?: string; title?: string; embyIndex: number }>> => {
     const ms = msRef.current
     if (!ms) return []
-    // 无条件从 Emby 提取最佳文本字幕轨(默认标记 > 中文 > 第一条):
+    // 取回片源的全部文本字幕轨(每轨独立提取、独立容错):
     // libmedia 的 demuxer 对部分 MKV 解不出字幕流(如罪恶王冠/旋风管家),
     // 必须通过 Emby 提取接口获取字幕内容,经 loadExternalSubtitle 装载
     const text = (ms.MediaStreams ?? []).filter(
@@ -303,30 +308,83 @@ export default function PlayerLite() {
     )
     if (text.length === 0) return []
     const strip = getBilingualStripPref()
-    const pick =
-      text.find((s) => s.IsDefault) ??
-      text.find((s) => (s.Language ?? '').toLowerCase().startsWith('zh')) ??
+    const results = await Promise.all(
+      text.map(async (pick): Promise<{ source: File; lang: string; title: string; embyIndex: number } | null> => {
+        try {
+          const raw = await fetchSubtitleText(
+            api,
+            { index: pick.Index, label: pick.DisplayTitle ?? '', codec: pick.Codec ?? '', isText: true, isGraphic: false, deliveryUrl: pick.DeliveryUrl },
+            itemId,
+            ms.Id,
+          )
+          // 固定格式:统一思源黑体/底部居中,双语按行堆叠;双语剥离按持久化偏好
+          const base = strip ? stripJapaneseEvents(raw) : raw
+          const content = toFixedFormatAss(base, 1920, 1080)
+          const file = new File([content], `subtitle-${pick.Index}.ass`, { type: 'text/plain' })
+          console.info(`[subtitle] 提取(固定格式):轨 ${pick.Index} ${pick.Codec} ${Math.round(content.length / 1024)}KB`)
+          return {
+            source: file,
+            lang: pick.Language ?? pick.Codec ?? '',
+            title: pick.DisplayTitle ?? pick.Title ?? `字幕轨 ${pick.Index}`,
+            embyIndex: pick.Index,
+          }
+        } catch (e) {
+          console.warn('[subtitle] 轨道提取失败,跳过', pick.Index, e)
+          return null
+        }
+      }),
+    )
+    const out = results.filter((x): x is NonNullable<typeof x> => x !== null)
+    // 菜单清单 + 初始优先轨(默认标记 > 中文 > 第一条)
+    setSubMenuTracks(out.map((o) => ({ embyIndex: o.embyIndex, label: o.title })))
+    const best =
+      text.find((t) => t.IsDefault) ??
+      text.find((t) => (t.Language ?? '').toLowerCase().startsWith('zh')) ??
       text[0]
-    try {
-      const raw = await fetchSubtitleText(
-        api,
-        { index: pick.Index, label: pick.DisplayTitle ?? '', codec: pick.Codec ?? '', isText: true, isGraphic: false, deliveryUrl: pick.DeliveryUrl },
-        itemId,
-        ms.Id,
-      )
-      // 固定格式:统一思源黑体/底部居中,双语按行堆叠;双语剥离按持久化偏好
-      const base = strip ? stripJapaneseEvents(raw) : raw
-      const content = toFixedFormatAss(base, 1920, 1080)
-      const file = new File([content], 'subtitle.ass', { type: 'text/plain' })
-      const out = [{ source: file, lang: pick.Language ?? pick.Codec ?? '', title: pick.DisplayTitle ?? pick.Title ?? '字幕' }]
-      console.info(`[subtitle] 外挂装载(固定格式):轨 ${pick.Index} ${pick.Codec} ${Math.round(content.length / 1024)}KB`)
-      return out
-    } catch (e) {
-      console.warn('[subtitle] 提取失败,无外挂字幕可装载', e)
-      return []
-    }
+    preferredSubEmbyRef.current = best.Index
+    out.sort((a, b) => (a.embyIndex === best.Index ? -1 : b.embyIndex === best.Index ? 1 : 0))
+    return out
   }, [api, itemId])
 
+  // 装载全部外挂字幕并捕获各自的内核流 id(逐个 diff),随后选中优先轨
+  const attachSubtitles = useCallback(async () => {
+    const player = playerRef.current
+    const subs = extSubsLoadedRef.current
+    if (!player || subs.length === 0) return
+    const snapSubIds = () =>
+      new Set(
+        (player.getStreams?.() ?? [])
+          .filter((x) => (x as { mediaType?: string }).mediaType === 'subtitle')
+          .map((x) => (x as { id: number }).id),
+      )
+    const idOf = new Map<number, number>()
+    let known = snapSubIds()
+    for (const s of subs) {
+      try {
+        await player.loadExternalSubtitle(s)
+      } catch (err) {
+        console.warn('[subtitle] 装载失败', err)
+        continue
+      }
+      const nowIds = snapSubIds()
+      for (const id of nowIds) {
+        if (!known.has(id) && ![...idOf.values()].includes(id)) {
+          idOf.set((s as { embyIndex: number }).embyIndex, id)
+          break
+        }
+      }
+      known = nowIds
+    }
+    extSubStreamIdOfRef.current = idOf
+    const pid = idOf.get(preferredSubEmbyRef.current)
+    if (pid) {
+      setSelectedSubEmby(preferredSubEmbyRef.current)
+      await player.selectSubtitle(pid).catch(() => {})
+    }
+    console.info(`[subtitle] 外挂字幕已装载:${subs.length} 条,可选 ${idOf.size} 条`)
+  }, [])
+
+  // ---------- 创建官方 AVPlayer(一次) ----------
   // ---------- 创建官方 AVPlayer(一次) ----------
   useEffect(() => {
     if (!surfaceRef.current || playerRef.current) return
@@ -664,10 +722,8 @@ export default function PlayerLite() {
         const subs = await (extSubsPRef.current ?? Promise.resolve([]))
         if (cancelled) return
         extSubsLoadedRef.current = subs
-        for (const s of subs) {
-          void player.loadExternalSubtitle(s).catch((err) => console.warn('[subtitle] 装载失败', err))
-        }
-        if (subs.length) console.info(`[subtitle] 外挂字幕已装载:${subs.length} 条`)
+        await attachSubtitles()
+        if (cancelled) return
       } catch (e) {
         if (cancelled) return
         setStatus('error')
@@ -677,7 +733,7 @@ export default function PlayerLite() {
     return () => {
       cancelled = true
     }
-  }, [src, prepareExternalSubs])
+  }, [src, prepareExternalSubs, attachSubtitles])
 
 
   // 卸载:停止上报 + 销毁
@@ -852,15 +908,13 @@ export default function PlayerLite() {
     setStage('正在恢复播放…')
     try {
       await player.load(srcRef.current.url, { ext: srcRef.current.ext } as never)
-      for (const s of extSubsLoadedRef.current) {
-        void player.loadExternalSubtitle(s).catch(() => {})
-      }
+      await attachSubtitles()
       if (atSec > 0) void player.seek(BigInt(Math.round(atSec * 1000))).catch(() => {})
       void player.play().catch(() => {})
     } catch { /* 失败则等下个周期再试 */ } finally {
       reloadingRef.current = false
     }
-  }, [])
+  }, [attachSubtitles])
 
 
   useEffect(() => {
@@ -1012,13 +1066,7 @@ export default function PlayerLite() {
     setRate(r)
   }, [])
 
-  const toggleSub = useCallback(() => {
-    const player = playerRef.current
-    if (!player) return
-    const nv = !subOn
-    player.setSubtitleEnable(nv)
-    setSubOn(nv)
-  }, [subOn])
+
 
   // 尝试锁定横屏:部分内核在全屏未完全落定时会 cancel lock,失败按 250/500/750/1000ms 重试,
   // 全部失败则降级为 CSS 旋转 90° 模拟横屏(B 站移动端同款兜底)
@@ -1124,6 +1172,25 @@ export default function PlayerLite() {
       if (!pausedRef.current) setShowControls(false)
     }, coarse ? 8000 : 3000)
   }, [])
+  const pickSubTrack = useCallback((embyIndex: number) => {
+    const player = playerRef.current
+    if (!player) return
+    const sid = extSubStreamIdOfRef.current.get(embyIndex)
+    setSelectedSubEmby(embyIndex)
+    setSubOn(true)
+    preferredSubEmbyRef.current = embyIndex
+    player.setSubtitleEnable(true)
+    if (sid) void player.selectSubtitle(sid).catch(() => {})
+    setOpenMenu(null)
+    armHide()
+  }, [armHide])
+
+  const closeSub = useCallback(() => {
+    playerRef.current?.setSubtitleEnable(false)
+    setSubOn(false)
+    setOpenMenu(null)
+    armHide()
+  }, [armHide])
   useEffect(() => {
     const wake = () => {
       setShowControls(true)
@@ -1353,7 +1420,35 @@ export default function PlayerLite() {
             <button onClick={() => seekBy(10)} title="快进 10 秒">⏩</button>
             <span className="ui-time">{fmt(cur)} / {fmt(dur)}</span>
             <div className="ui-flex" />
-            <button onClick={toggleSub} title="字幕" className={subOn ? 'ui-on' : 'ui-off'}>字</button>
+            {subMenuTracks.length > 0 ? (
+              <div className="ui-menu-box">
+                <button
+                  onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === 'sub' ? null : 'sub') }}
+                  title="字幕"
+                  className={subOn ? 'ui-on' : 'ui-off'}
+                >字</button>
+                {openMenu === 'sub' && (
+                  <div className="ui-menu" onClick={(e) => e.stopPropagation()}>
+                    <button className={`ui-menu-item ${!subOn ? 'ui-on' : ''}`} onClick={closeSub}>关闭字幕</button>
+                    {subMenuTracks.map((t) => (
+                      <button
+                        key={t.embyIndex}
+                        className={`ui-menu-item ${subOn && selectedSubEmby === t.embyIndex ? 'ui-on' : ''}`}
+                        onClick={() => pickSubTrack(t.embyIndex)}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button
+                onClick={() => { playerRef.current?.setSubtitleEnable(!subOn); setSubOn(!subOn) }}
+                title="字幕"
+                className={subOn ? 'ui-on' : 'ui-off'}
+              >字</button>
+            )}
             {audioTracks.length > 1 && (
               <div className="ui-menu-box">
                 <button onClick={(e) => { e.stopPropagation(); setOpenMenu(openMenu === 'audio' ? null : 'audio') }} title="音轨">音轨</button>
