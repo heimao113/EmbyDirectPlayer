@@ -186,6 +186,21 @@ export default function PlayerLite() {
   const vDeadCountRef = useRef(0)
   // 音频存活以内核事件为准(FIRST_AUDIO_RENDERED);帧率统计在 wasm 模式恒为 0,不可作依据
   const audioAliveRef = useRef(false)
+  // 播放后若 AudioContext 被自动播放策略挂起 → 主动暂停,等用户手势再续(否则音频时钟会把播放拽回 0)
+  const smartPlay = useCallback(() => {
+    const p = playerRef.current
+    if (!p) return
+    void p.play().catch(() => {})
+    window.setTimeout(() => {
+      try {
+        const AP = AVPlayer as unknown as { isAudioContextSuspended?: () => boolean }
+        if (AP.isAudioContextSuspended?.()) {
+          p.pause()
+          setAudioDead(true)
+        }
+      } catch { /* ignore */ }
+    }, 800)
+  }, [])
   // 设备自适应:默认 wasm(规格 §6),检测到 wasm 撑不住(解封装失败/帧率过低/反复无渲染)的设备升级 MSE
   const useMseRef = useRef(false)
   const demuxErrCountRef = useRef(0)
@@ -501,6 +516,8 @@ export default function PlayerLite() {
         audioRecoveringRef.current = true
         window.setTimeout(() => { audioRecoveringRef.current = false }, 900)
         recoverAudioCtx()
+        // 手势在场,恢复上下文后自动续播(从暂停的续播位继续)
+        window.setTimeout(() => smartPlay(), 250)
       }
     }
     document.addEventListener('pointerdown', onGesture)
@@ -593,7 +610,7 @@ export default function PlayerLite() {
         void player.seek(BigInt(Math.round(seek * 1000))).catch(() => {})
         verifySeek(seek)
       }
-      void player.play().catch(() => {})
+      smartPlay()
     })
     player.on(Events.PAUSED, () => { pausedRef.current = true; setPaused(true) })
     player.on(Events.PLAYED, () => { pausedRef.current = false; setPaused(false) })
@@ -1016,11 +1033,11 @@ export default function PlayerLite() {
           }
         }, 2500)
       }
-      void player.play().catch(() => {})
+      smartPlay()
     } catch { /* 失败则等下个周期再试 */ } finally {
       reloadingRef.current = false
     }
-  }, [attachSubtitles])
+  }, [attachSubtitles, smartPlay])
 
 
   useEffect(() => {
@@ -1044,26 +1061,12 @@ export default function PlayerLite() {
         stall.lastSec = sec
         stall.lastTs = now
       }
-      // 音频存活守卫:内核 FIRST_AUDIO_RENDERED 事件为准(帧率统计 wasm 下恒 0,不可靠)。
-      // 有音频轨但起播 20 秒仍无音频渲染:
-      //   a) AudioContext 被自动播放策略挂起(刷新后常见)→ 恢复上下文 + 提示点击,重载无效不重载
-      //   b) 上下文在跑但仍无渲染(管线真死)→ 软重载恢复,每 60 秒至多一次
+      // 音频异常兜底:上下文在跑、非暂停,但 5 分钟迟迟无 FIRST_AUDIO_RENDERED(管线真死)→ 软重载
       const hasAudio = (msRef.current?.MediaStreams?.some((x) => x.Type === 'Audio')) ?? false
-      if (hasAudio && !audioAliveRef.current && !pausedRef.current && now - readyAtRef.current > 20_000 && now - audio.lastAt > 60_000) {
+      if (hasAudio && !audioAliveRef.current && !pausedRef.current && now - readyAtRef.current > 300_000 && now - audio.lastAt > 60_000) {
         audio.lastAt = now
-        let suspended = false
-        try {
-          const AP = AVPlayer as unknown as { isAudioContextSuspended?: () => boolean }
-          suspended = !!AP.isAudioContextSuspended?.()
-        } catch { /* ignore */ }
-        if (suspended) {
-          setAudioDead(true)
-          console.warn('[player] AudioContext 被挂起,自动尝试恢复 + 提示点击')
-          recoverAudioCtx()
-        } else {
-          console.warn('[player] 起播 20 秒无音频渲染,软重载恢复')
-          void hardReload(sec)
-        }
+        console.warn('[player] 5 分钟无音频渲染,软重载恢复')
+        void hardReload(sec)
       }
     }, 1000)
     return () => clearInterval(timer)
@@ -1621,10 +1624,11 @@ export default function PlayerLite() {
           onClick={(e) => {
             e.stopPropagation()
             recoverAudioCtx()
+            smartPlay()
             setAudioDead(false)
           }}
         >
-          🔇 无声?点击开启声音
+          🔇 点击开启声音并继续播放
         </button>
       )}
       {seekFlash && (
