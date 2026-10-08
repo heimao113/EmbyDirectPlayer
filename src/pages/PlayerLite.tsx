@@ -151,6 +151,13 @@ export default function PlayerLite() {
   const lastUiTickRef = useRef(0)
   const tapStartedVisibleRef = useRef(false)
   const vDeadCountRef = useRef(0)
+  // 设备自适应:默认 wasm(规格 §6),检测到 wasm 撑不住(解封装失败/帧率过低/反复无渲染)的设备升级 MSE
+  const useMseRef = useRef(false)
+  const demuxErrCountRef = useRef(0)
+  const lowFpsTicksRef = useRef(0)
+  const vDeadReloadCountRef = useRef(0)
+  // escalateToMSE 在后方定义,经由 ref 转发给更早绑定的事件处理器
+  const escalateRef = useRef<(reason: string) => void>(() => {})
   // 方向锁定失败(部分安卓内核在全屏切换中会 cancel lock)→ CSS 旋转 90° 模拟横屏(B 站同款兜底)
   const [forceLandscape, setForceLandscape] = useState(false)
   const orientRetryRef = useRef<number[]>([])
@@ -368,7 +375,7 @@ export default function PlayerLite() {
       // 规格 §6.1 强制 wasm 软解:不用 MSE 通道。
       // 弱内核(部分安卓浏览器)的 MSE worker 会被系统掐死,残留 postMessage 调用直接崩;
       // wasm + canvas + WebAudio 全程自渲染,状态自洽,移动端确定性最好
-      checkUseMSE: () => false,
+      checkUseMSE: () => useMseRef.current,
     } as never)
     playerRef.current = player
     ;(window as unknown as Record<string, unknown>).__litePlayer = player
@@ -431,6 +438,10 @@ export default function PlayerLite() {
       const e = args[1] ?? args[0]
       const msg = String((e as { message?: string })?.message ?? e).slice(0, 300)
       console.error('[player] libmedia ERROR', args)
+      if (msg.includes('demux error')) {
+        demuxErrCountRef.current += 1
+        if (demuxErrCountRef.current >= 3) escalateRef.current('WASM 解封装连续失败')
+      }
       reportFatal('内核: ' + msg)
     })
     player.on(Events.PAUSED, () => { pausedRef.current = true; setPaused(true) })
@@ -450,12 +461,22 @@ export default function PlayerLite() {
           }
         }
         // 首帧检测:MSE 由浏览器解码(立即算出帧);wasm 软解等渲染帧率 >0 才算出画
+        let st: { videoRenderFramerate?: unknown } | undefined
+        try { st = player.getStats?.() } catch { /* ignore */ }
         if (!gotFirstFrame) {
           try {
-            const st = player.getStats?.()
             const isMSE = !!surfaceRef.current?.querySelector('video')
             if (isMSE || Number(st?.videoRenderFramerate ?? 0) > 0) setGotFirstFrame(true)
           } catch { /* ignore */ }
+        }
+        // 软解卡顿升级采样:wasm 模式已出帧但帧率持续过低(~5 秒)→ 升级 MSE
+        if (!useMseRef.current && gotFirstFrame && !pausedRef.current && dur > 0) {
+          const fps = Number(st?.videoRenderFramerate ?? 0)
+          lowFpsTicksRef.current = fps > 0 && fps < 12 ? lowFpsTicksRef.current + 1 : 0
+          if (lowFpsTicksRef.current >= 12) {
+            lowFpsTicksRef.current = 0
+            escalateRef.current('软解帧率过低(' + fps.toFixed(1) + 'fps)')
+          }
         }
         // seek 后视频防活:6 秒内 seek 过且渲染帧率持续为 0(≥1.6s)→ 软重载自愈
         // (部分内核 wasm demuxer seek 后报 demux error -2 且不再恢复)
@@ -469,6 +490,8 @@ export default function PlayerLite() {
           if (vDeadCountRef.current >= 4) {
             vDeadCountRef.current = 0
             console.warn('[player] seek 后视频无渲染,软重载恢复')
+            vDeadReloadCountRef.current += 1
+            if (vDeadReloadCountRef.current >= 2) escalateRef.current('WASM 视频反复无渲染')
             void hardReload(Number(player.currentTime ?? 0) / 1000)
             return
           }
@@ -838,6 +861,7 @@ export default function PlayerLite() {
     }
   }, [])
 
+
   useEffect(() => {
     if (status !== 'ready') return
     const stall = { lastSec: 0, lastTs: 0, count: 0, reloadedAt: 0 }
@@ -913,6 +937,11 @@ export default function PlayerLite() {
       if (!player) return
       // 软重载进行中:worker 正在重建,seek 转为待执行
       if (reloadingRef.current) {
+        pendingSeekRef.current = target
+        return
+      }
+      // 时长未知(demux 异常/未就绪)时 seek 会触发内核 BigInt 除零,转待执行
+      if (!dur) {
         pendingSeekRef.current = target
         return
       }
@@ -1031,6 +1060,17 @@ export default function PlayerLite() {
       }, d)
     })
   }, [])
+
+  // 设备自适应升级:MSE 兼容通道(切换后软重载重新协商管线)
+  const escalateToMSE = useCallback((reason: string) => {
+    if (useMseRef.current) return
+    useMseRef.current = true
+    reportFatal('已切换兼容解码通道(MSE): ' + reason)
+    kickResize()
+    const sec = Number(playerRef.current?.currentTime ?? 0) / 1000
+    void hardReload(sec)
+  }, [hardReload, kickResize])
+  escalateRef.current = escalateToMSE
 
   const toggleFullscreen = useCallback(() => {
     const el = shellRef.current as (HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void }) | null
