@@ -138,6 +138,9 @@ export default function PlayerLite() {
   const lastTapRef = useRef(0)
   const lastUiTickRef = useRef(0)
   const tapStartedVisibleRef = useRef(false)
+  // 方向锁定失败(部分安卓内核在全屏切换中会 cancel lock)→ CSS 旋转 90° 模拟横屏(B 站同款兜底)
+  const [forceLandscape, setForceLandscape] = useState(false)
+  const orientRetryRef = useRef<number[]>([])
   const [seekFlash, setSeekFlash] = useState<{ side: 'l' | 'r' } | null>(null)
   const flashTimerRef = useRef<number | undefined>(undefined)
   const flashSeek = useCallback((side: 'l' | 'r') => {
@@ -908,10 +911,37 @@ export default function PlayerLite() {
     setSubOn(nv)
   }, [subOn])
 
+  // 尝试锁定横屏:部分内核在全屏未完全落定时会 cancel lock,失败按 250/500/750/1000ms 重试,
+  // 全部失败则降级为 CSS 旋转 90° 模拟横屏(B 站移动端同款兜底)
+  const tryLockLandscape = useCallback((attempt: number) => {
+    const so = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }
+    if (!so?.lock) {
+      setForceLandscape(true)
+      return
+    }
+    so.lock('landscape')
+      .then(() => setForceLandscape(false))
+      .catch(() => {
+        if (attempt >= 4) {
+          setForceLandscape(true)
+          return
+        }
+        const t = window.setTimeout(() => tryLockLandscape(attempt + 1), 250 * (attempt + 1))
+        orientRetryRef.current.push(t)
+      })
+  }, [])
+
+  const clearOrientRetry = useCallback(() => {
+    orientRetryRef.current.forEach((t) => window.clearTimeout(t))
+    orientRetryRef.current = []
+  }, [])
+
   const toggleFullscreen = useCallback(() => {
     const el = shellRef.current as (HTMLElement & { webkitRequestFullscreen?: () => Promise<void> | void }) | null
     try {
       if (document.fullscreenElement) {
+        clearOrientRetry()
+        setForceLandscape(false)
         try { (screen.orientation as ScreenOrientation & { unlock?: () => void }).unlock?.() } catch { /* ignore */ }
         void document.exitFullscreen().catch(() => {})
         return
@@ -919,23 +949,20 @@ export default function PlayerLite() {
       const req = el?.requestFullscreen?.bind(el) ?? el?.webkitRequestFullscreen?.bind(el)
       if (!req) {
         reportFatal('当前浏览器不支持网页全屏 API,请改用 Chrome')
+        setForceLandscape(true)
         return
       }
       Promise.resolve(req()).then(() => {
-        const so = screen.orientation as ScreenOrientation & { lock?: (o: string) => Promise<void> }
-        if (so?.lock) {
-          // 手机上进入全屏自动横屏(必须处于全屏态才允许锁定)
-          so.lock('landscape').catch((e: unknown) => {
-            reportFatal('方向锁定失败(画面不会自动转横屏): ' + String((e as Error)?.message ?? e))
-          })
-        }
+        // 手机上进入全屏自动横屏;锁定失败自动降级 CSS 模拟横屏
+        tryLockLandscape(0)
       }).catch((e: unknown) => {
         reportFatal('进入全屏失败: ' + String((e as Error)?.message ?? e))
+        setForceLandscape(true)
       })
     } catch (e) {
       reportFatal('全屏异常: ' + String((e as Error)?.message ?? e))
     }
-  }, [])
+  }, [tryLockLandscape, clearOrientRetry])
 
   const selectAudio = useCallback(async (id: number) => {
     const player = playerRef.current
@@ -1047,6 +1074,27 @@ export default function PlayerLite() {
     return () => clearInterval(t)
   }, [diagOpen, status])
 
+  // ---------- 全屏态清理:用户从系统手势退出全屏时同步撤销 CSS 横屏 ----------
+  useEffect(() => {
+    if (!forceLandscape) return
+    const onFsChange = () => {
+      if (!document.fullscreenElement) {
+        clearOrientRetry()
+        setForceLandscape(false)
+      }
+    }
+    const onResize = () => {
+      // 用户物理旋转到横屏后,CSS 旋转就多余了
+      if (window.innerWidth > window.innerHeight) setForceLandscape(false)
+    }
+    document.addEventListener('fullscreenchange', onFsChange)
+    window.addEventListener('resize', onResize)
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange)
+      window.removeEventListener('resize', onResize)
+    }
+  }, [forceLandscape, clearOrientRetry])
+
   // ---------- 键盘 ----------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -1080,7 +1128,7 @@ export default function PlayerLite() {
   return (
     <div
       ref={shellRef}
-      className={`ui-player-page ${!showControls && status === 'ready' && !paused ? 'ui-hide-cursor' : ''}`}
+      className={`ui-player-page ${forceLandscape ? 'ui-force-landscape' : ''} ${!showControls && status === 'ready' && !paused ? 'ui-hide-cursor' : ''}`}
       onMouseMove={() => setShowControls(true)}
     >
       {item && (

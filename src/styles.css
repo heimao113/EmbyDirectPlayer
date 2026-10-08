@@ -1614,3 +1614,16 @@ canvas.JASSUB { pointer-events: none !important; }
 /* ===== 全屏态 ===== */
 .ui-player-page:fullscreen { width: 100vw; height: 100vh; }
 .ui-player-page:-webkit-full-screen { width: 100vw; height: 100vh; }
+
+/* ===== CSS 模拟横屏(方向锁定被拒时的兜底) ===== */
+.ui-player-page.ui-force-landscape {
+  inset: auto;
+  top: 50%;
+  left: 50%;
+  width: 100vh;
+  height: 100vw;
+  transform: translate(-50%, -50%) rotate(90deg);
+  transform-origin: center center;
+  border-radius: 0;
+  z-index: 99990;
+}
