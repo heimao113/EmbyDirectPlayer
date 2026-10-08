@@ -1047,7 +1047,7 @@ export default function PlayerLite() {
   // CSS 旋转/全屏切换不会自动触发 resize,内核(libmedia)会按旧尺寸摆视频面导致画面被拉扁;
   // 在数百毫秒内多次补发 resize 强制重算
   const kickResize = useCallback(() => {
-    ;[60, 300, 800, 1500].forEach((d) => {
+    ;[60, 300, 800, 1500, 2500].forEach((d) => {
       window.setTimeout(() => {
         try { window.dispatchEvent(new Event('resize')) } catch { /* ignore */ }
         try {
@@ -1235,28 +1235,6 @@ export default function PlayerLite() {
       window.removeEventListener('resize', onResize)
     }
   }, [forceLandscape, clearOrientRetry, kickResize])
-
-  // ---------- 手机:全屏往返后内核的视频面/字幕层/音轨状态易错乱,退出全屏时软重载恢复 ----------
-  const fsReloadTimerRef = useRef<number | undefined>(undefined)
-  useEffect(() => {
-    if (!coarsePointerRef.current) return
-    const onFsChange = () => {
-      if (document.fullscreenElement) return
-      // 等退出过渡落定后软重载:自动重挂字幕/音轨并回到当前进度
-      if (fsReloadTimerRef.current) window.clearTimeout(fsReloadTimerRef.current)
-      fsReloadTimerRef.current = window.setTimeout(() => {
-        const player = playerRef.current
-        if (!player || !startedRef.current) return
-        const sec = Number(player.currentTime ?? 0) / 1000
-        void hardReload(sec)
-      }, 400)
-    }
-    document.addEventListener('fullscreenchange', onFsChange)
-    return () => {
-      document.removeEventListener('fullscreenchange', onFsChange)
-      if (fsReloadTimerRef.current) window.clearTimeout(fsReloadTimerRef.current)
-    }
-  }, [hardReload])
 
   // ---------- 键盘 ----------
   useEffect(() => {
